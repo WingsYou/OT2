@@ -1,0 +1,58 @@
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Machine-specific files and secrets
+.DS_Store
+._*
+Thumbs.db
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+/configs/local/
+*.swp
+*.swo
+*~
+
+# Local study inputs and generated experiment directories
+/data/
+/dataset/
+/raw_data/
+/artifacts/
+/outputs/
+/results/
+/ot2_output/
+/ot2_result/
+/model_*/
+/checkpoints/
+/caches/
+/logs/
+/wandb/
+/runs/
+/backups/
+
+# Model weights, token caches, and local run logs
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.log
+events.out.tfevents.*
+
+# Historical cluster distribution archives
+ot2_cluster_*.tar.gz
+ot2_cluster_*.tar.gz.sha256

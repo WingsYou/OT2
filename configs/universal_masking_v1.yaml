@@ -1,0 +1,58 @@
+# Validation-only single-seed pilot for learning task-relevant relationships
+# among the nine OT2 modality tokens.  This config never authorizes test use.
+format_version: ot2-universal-masked-reconstruction-v1
+
+mask:
+  # Probabilities are applied independently per participant on train only.
+  # Artificial masking can hide only modalities that were genuinely present,
+  # and at least one genuinely present modality is always retained.
+  no_drop_probability: 0.15
+  single_drop_probability: 0.35
+  family_drop_probability: 0.20
+  random_drop_probability: 0.30
+  families:
+    retinal:
+      - retinal_flio
+      - retinal_oct
+      - retinal_octa
+      - retinal_photography
+    longitudinal:
+      - environment
+      - wearable_activity_monitor
+      - wearable_blood_glucose
+
+reconstructor:
+  num_heads: 4
+  decoder_layers: 2
+  ffn_multiplier: 2
+  dropout: 0.10
+
+loss:
+  temperature: 2.0
+  # The reconstructed and observed-only branches see the same artificial mask.
+  # This prevents a weak removal-only path from inflating estimated importance.
+  supervised_weight: 1.0
+  observed_only_supervised_weight: 0.5
+  logit_kd_weight: 1.0
+  patient_embedding_weight: 1.0
+  token_reconstruction_weight: 1.0
+
+selection:
+  # Checkpoint selection is validation-only.  A candidate is ineligible if its
+  # full-input AUROC is more than this amount below the frozen teacher.  Among
+  # eligible candidates, absolute masked reconstructed AUROC is ranked first;
+  # fidelity and gain are report-level lexicographic tie breakers only.
+  full_teacher_auroc_tolerance: 0.02
+  # Participant-ID-keyed, so assignments are stable across batch sizes/order.
+  deployment_mask_seed: 20260906
+
+training:
+  # Token-level batches are compact: [participant, 9 modalities, 256 values].
+  batch_size: 128
+  max_epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  warmup_ratio: 0.10
+  gradient_accumulation_steps: 1
+  grad_clip_norm: 1.0
+  early_stopping_patience: 8
