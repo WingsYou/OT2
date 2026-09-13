@@ -1,0 +1,397 @@
+{
+  "schema_version": "ot2-cbm-concept-spec-v1",
+  "definition_source": "https://docs.aireadi.org/v3-omopAndClinicalTable",
+  "concepts": [
+    {
+      "name": "bmi",
+      "type": "continuous",
+      "unit": "kg/m\u00b2",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "bmi_vsorres",
+          "concept_id": 4245997
+        }
+      ],
+      "unit_concept_ids": [],
+      "unit_aliases": [
+        "kg/m2",
+        "kg/m^2",
+        "kg/m\u00b2"
+      ],
+      "allow_documented_blank_unit": true,
+      "documented_unit_note": "Source-specific units documented in AI-READI v3 clinical table; raw catalog may omit units. No unit conversion or BMI recalculation.",
+      "minimum": 0,
+      "minimum_inclusive": false
+    },
+    {
+      "name": "systolic_bp",
+      "type": "continuous",
+      "unit": "mmHg",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "bp1_sysbp_vsorres",
+          "concept_id": 3004249
+        },
+        {
+          "table": "measurement",
+          "source_key": "bp2_sysbp_vsorres",
+          "concept_id": 3004249
+        }
+      ],
+      "unit_concept_ids": [],
+      "unit_aliases": [
+        "mmHg",
+        "mm[Hg]"
+      ],
+      "allow_documented_blank_unit": true,
+      "documented_unit_note": "Source-specific units documented in AI-READI v3 clinical table; raw catalog may omit units. No unit conversion or BMI recalculation.",
+      "minimum": 0,
+      "minimum_inclusive": false
+    },
+    {
+      "name": "diastolic_bp",
+      "type": "continuous",
+      "unit": "mmHg",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "bp1_diabp_vsorres",
+          "concept_id": 3012888
+        },
+        {
+          "table": "measurement",
+          "source_key": "bp2_diabp_vsorres",
+          "concept_id": 3012888
+        }
+      ],
+      "unit_concept_ids": [],
+      "unit_aliases": [
+        "mmHg",
+        "mm[Hg]"
+      ],
+      "allow_documented_blank_unit": true,
+      "documented_unit_note": "Source-specific units documented in AI-READI v3 clinical table; raw catalog may omit units. No unit conversion or BMI recalculation.",
+      "minimum": 0,
+      "minimum_inclusive": false
+    },
+    {
+      "name": "hba1c",
+      "type": "continuous",
+      "unit": "%",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "import_hba1c",
+          "concept_id": 3004410
+        }
+      ],
+      "unit_concept_ids": [
+        8554
+      ],
+      "unit_aliases": [
+        "%",
+        "percent"
+      ],
+      "allow_documented_blank_unit": false,
+      "documented_unit_note": "Require compatible recorded unit source or unit concept ID; no conversion.",
+      "minimum": 0,
+      "minimum_inclusive": true
+    },
+    {
+      "name": "hdl_cholesterol",
+      "type": "continuous",
+      "unit": "mg/dL",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "import_hdl_cholesterol",
+          "concept_id": 3007070
+        }
+      ],
+      "unit_concept_ids": [
+        8840
+      ],
+      "unit_aliases": [
+        "mg/dL"
+      ],
+      "allow_documented_blank_unit": false,
+      "documented_unit_note": "Require compatible recorded unit source or unit concept ID; no conversion.",
+      "minimum": 0,
+      "minimum_inclusive": true
+    },
+    {
+      "name": "ldl_cholesterol",
+      "type": "continuous",
+      "unit": "mg/dL",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "import_ldl_cholesterol",
+          "concept_id": 3028288
+        }
+      ],
+      "unit_concept_ids": [
+        8840
+      ],
+      "unit_aliases": [
+        "mg/dL"
+      ],
+      "allow_documented_blank_unit": false,
+      "documented_unit_note": "Require compatible recorded unit source or unit concept ID; no conversion.",
+      "minimum": 0,
+      "minimum_inclusive": true
+    },
+    {
+      "name": "photopic_logmar_right",
+      "type": "continuous",
+      "unit": "LogMAR",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "viaodpscore",
+          "concept_id": 2005200052
+        }
+      ],
+      "unit_concept_ids": [],
+      "unit_aliases": [
+        "LogMAR"
+      ],
+      "allow_documented_blank_unit": true,
+      "documented_unit_note": "Source-specific units documented in AI-READI v3 clinical table; raw catalog may omit units. No unit conversion or BMI recalculation.",
+      "minimum": null,
+      "minimum_inclusive": true
+    },
+    {
+      "name": "photopic_logmar_left",
+      "type": "continuous",
+      "unit": "LogMAR",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "viaospscore",
+          "concept_id": 2005200053
+        }
+      ],
+      "unit_concept_ids": [],
+      "unit_aliases": [
+        "LogMAR"
+      ],
+      "allow_documented_blank_unit": true,
+      "documented_unit_note": "Source-specific units documented in AI-READI v3 clinical table; raw catalog may omit units. No unit conversion or BMI recalculation.",
+      "minimum": null,
+      "minimum_inclusive": true
+    },
+    {
+      "name": "photopic_log_contrast_right",
+      "type": "continuous",
+      "unit": "log contrast sensitivity",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "plcsodlog",
+          "concept_id": 2005200155
+        }
+      ],
+      "unit_concept_ids": [],
+      "unit_aliases": [
+        "logCS",
+        "log contrast sensitivity"
+      ],
+      "allow_documented_blank_unit": true,
+      "documented_unit_note": "Source-specific units documented in AI-READI v3 clinical table; raw catalog may omit units. No unit conversion or BMI recalculation.",
+      "minimum": null,
+      "minimum_inclusive": true
+    },
+    {
+      "name": "photopic_log_contrast_left",
+      "type": "continuous",
+      "unit": "log contrast sensitivity",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "plcsoslog",
+          "concept_id": 2005200156
+        }
+      ],
+      "unit_concept_ids": [],
+      "unit_aliases": [
+        "logCS",
+        "log contrast sensitivity"
+      ],
+      "allow_documented_blank_unit": true,
+      "documented_unit_note": "Source-specific units documented in AI-READI v3 clinical table; raw catalog may omit units. No unit conversion or BMI recalculation.",
+      "minimum": null,
+      "minimum_inclusive": true
+    },
+    {
+      "name": "self_reported_activity",
+      "type": "categorical",
+      "unit": "category",
+      "sources": [
+        {
+          "table": "observation",
+          "source_key": "dmlact",
+          "concept_id": 44808782
+        }
+      ],
+      "categories": [
+        0,
+        1,
+        2
+      ],
+      "category_labels": [
+        "inactive",
+        "somewhat_active",
+        "active"
+      ],
+      "response_mapping": {
+        "2005200314": {
+          "category": 2,
+          "raw_values": [
+            10
+          ]
+        },
+        "2005200315": {
+          "category": 1,
+          "raw_values": [
+            5
+          ]
+        },
+        "2005200316": {
+          "category": 0,
+          "raw_values": [
+            0
+          ]
+        }
+      },
+      "unknown_or_refused": "All response IDs outside response_mapping are masked; no numeric-only fallback."
+    },
+    {
+      "name": "restless_sleep",
+      "type": "categorical",
+      "unit": "category",
+      "sources": [
+        {
+          "table": "observation",
+          "source_key": "ces7",
+          "concept_id": 1761695
+        }
+      ],
+      "categories": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "category_labels": [
+        "rarely_or_none_less_than_1_day",
+        "some_or_little_1_to_2_days",
+        "occasionally_3_to_4_days",
+        "most_or_all_5_to_7_days"
+      ],
+      "response_mapping": {
+        "2005200141": {
+          "category": 0,
+          "raw_values": [
+            0
+          ]
+        },
+        "2005200142": {
+          "category": 1,
+          "raw_values": [
+            1
+          ]
+        },
+        "2005200143": {
+          "category": 2,
+          "raw_values": [
+            2
+          ]
+        },
+        "2005200144": {
+          "category": 3,
+          "raw_values": [
+            3
+          ]
+        }
+      },
+      "unknown_or_refused": "All response IDs outside response_mapping are masked; this is a CES-D restless-sleep item, not an overall sleep-quality score."
+    }
+  ],
+  "temporal_policy": "Require a valid single calendar date per participant and concept. Mean repeated numeric records within each exact source on that date, then equally average eligible BP1/BP2 source means. Do not average across eyes. Multiple dates, conflicting questionnaire answers, mismatched source concept IDs or units invalidate that participant-concept label. Targets are recorded clinical measurements and questionnaire responses whose dates can differ across sources. A single date within each concept does not guarantee eligibility at a prediction time or establish that a label precedes the outcome.",
+  "forbidden_source_policy": "Only these exact 12 active concept definitions and listed source/OMOP IDs are allowed. Deferred biomarkers, MoCA items/total, CVD outcome components, administrative and acquisition indicators never enter the initial bottleneck.",
+  "limitations": [
+    "Frozen-representation concept supervision is independent of model inputs.",
+    "Recorded numeric values are used without blind unit conversion or recalculation.",
+    "Final task- and split-specific validity still depends on measurement timing and source-data review.",
+    "NT-proBNP and Troponin T remain documented deferred candidates; their censored values are not imputed or recoded into new indicators."
+  ],
+  "deferred_candidates": [
+    {
+      "name": "nt_probnp",
+      "type": "continuous",
+      "unit": "pg/mL",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "import_nt_probnp",
+          "concept_id": 3029187
+        }
+      ],
+      "unit_concept_ids": [
+        8845
+      ],
+      "unit_aliases": [
+        "pg/mL"
+      ],
+      "allow_documented_blank_unit": false,
+      "documented_unit_note": "Require compatible recorded unit source or unit concept ID; no conversion.",
+      "minimum": 0,
+      "minimum_inclusive": true,
+      "deferred_reason": "Excluded from the initial strict bottleneck because many measurements are left-censored; this version does not treat assay bounds as exact concentrations or introduce censored regression.",
+      "local_feasibility_audit": {
+        "cohort": "participants.tsv recommended train/val only; not final task cohorts",
+        "n_train": 1576,
+        "n_val": 352,
+        "candidate_records": 1890,
+        "left_censored_records": 828,
+        "exact_valid_labels_train": 875,
+        "exact_valid_labels_val": 187
+      }
+    },
+    {
+      "name": "troponin_t",
+      "type": "continuous",
+      "unit": "ng/L",
+      "sources": [
+        {
+          "table": "measurement",
+          "source_key": "import_troponin_t",
+          "concept_id": 40769783
+        }
+      ],
+      "unit_concept_ids": [
+        8725
+      ],
+      "unit_aliases": [
+        "ng/L"
+      ],
+      "allow_documented_blank_unit": false,
+      "documented_unit_note": "Require compatible recorded unit source or unit concept ID; no conversion.",
+      "minimum": 0,
+      "minimum_inclusive": true,
+      "deferred_reason": "Excluded from the initial strict bottleneck because many measurements are left-censored; this version does not treat assay bounds as exact concentrations or introduce censored regression.",
+      "local_feasibility_audit": {
+        "cohort": "participants.tsv recommended train/val only; not final task cohorts",
+        "n_train": 1576,
+        "n_val": 352,
+        "candidate_records": 1890,
+        "left_censored_records": 633,
+        "exact_valid_labels_train": 1007,
+        "exact_valid_labels_val": 249
+      }
+    }
+  ]
+}

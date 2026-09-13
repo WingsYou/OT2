@@ -56,3 +56,9 @@ events.out.tfevents.*
 # Historical cluster distribution archives
 ot2_cluster_*.tar.gz
 ot2_cluster_*.tar.gz.sha256
+
+# Consolidated pipeline outputs and distribution packages
+/cache/
+/supplemental_inputs/
+*.tar.gz
+*.tar.gz.sha256

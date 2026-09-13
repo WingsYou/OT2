@@ -1,0 +1,80 @@
+[
+  {
+    "source": "user_supplied/downstream_tasks.json",
+    "destination": "data_preprocessing_cluster/configs/downstream_tasks.json",
+    "source_sha256": "36b7e86710d9c2078ac87652edf213d5d3feda22540f3e69faa8c02fccdac7e8",
+    "change": "exact copy"
+  },
+  {
+    "source": "user_supplied/fit_train_scalers_v2.py",
+    "destination": "data_preprocessing_cluster/fit_train_scalers_v2.py",
+    "source_sha256": "1c8138a3a66ff6ad922f4e907df95c0b0e5c67487042963a37ed9fce52102419",
+    "change": "exact copy"
+  },
+  {
+    "source": "ot2_cluster_cbm_history_fast_v2_fix1_20260913/build_history_task_labels_v1.py",
+    "destination": "data_preprocessing_cluster/build_history_task_labels_v1.py",
+    "source_sha256": "3ba4edbc5e6c6d4f068d9b86a37a832bb2dabb076d03ec188be7259f97ed0981",
+    "change": "import helper renamed"
+  },
+  {
+    "source": "ot2_cluster_cbm_history_fast_v2_fix1_20260913/history_tasks_v1.py",
+    "destination": "data_preprocessing_cluster/history_tasks_v1.py",
+    "source_sha256": "c1ab3c0d6c05137bf2f4d400dbe50a5741267264c4e6d9528863b5287be32ef7",
+    "change": "import helper renamed"
+  },
+  {
+    "source": "ot2_cluster_cbm_history_fast_v2_fix1_20260913/build_cbm_concepts_v1.py",
+    "destination": "data_preprocessing_cluster/build_cbm_concepts_v1.py",
+    "source_sha256": "d497625e210fba7bd1216073f73798e6592d4c44949e2fe8209f91d8746b61d5",
+    "change": "exact copy"
+  },
+  {
+    "source": "ot2_cluster_cbm_history_fast_v2_fix1_20260913/requirements-preprocessing-v2.txt",
+    "destination": "data_preprocessing_cluster/requirements-preprocessing-v2.txt",
+    "source_sha256": "caeb15cdeaeffe48a071c858ab0f4386c67151fc098a6cbd426845ba934913e0",
+    "change": "exact copy"
+  },
+  {
+    "source": "ot2_cluster_cbm_history_fast_v2_fix1_20260913/configs/history_tasks_v1.json",
+    "destination": "data_preprocessing_cluster/configs/history_tasks_v1.json",
+    "source_sha256": "5b0fb6732ba040e9fd3376570191e3f456f597e97b15c229ec43c1633c92ceab",
+    "change": "exact copy"
+  },
+  {
+    "source": "ot2_cluster_cbm_history_fast_v2_fix1_20260913/configs/history_tasks_official_mapping_v1.json",
+    "destination": "data_preprocessing_cluster/configs/history_tasks_official_mapping_v1.json",
+    "source_sha256": "deb35a45bc5c1a0efe2283c5203c4d5ba41ee202c9bbc8edd3068056f6985ac7",
+    "change": "exact copy"
+  },
+  {
+    "source": "ot2_cluster_cbm_history_fast_v2_fix1_20260913/configs/cbm_concepts_v1.json",
+    "destination": "data_preprocessing_cluster/configs/cbm_concepts_v1.json",
+    "source_sha256": "90e829d9ce3c475469d493e599e6962c3f66ff3e1d99caab3ecd13cd96919bb7",
+    "change": "exact copy"
+  },
+  {
+    "source": "ot2/build_retinal_model_view_sidecars_v2.py",
+    "destination": "data_preprocessing_cluster/build_retinal_model_view_sidecars_v2.py",
+    "source_sha256": "1f464cd3508dd7d4080d9cdcffb5239012b031d6b3194a3eb9f4ff07833fa52a",
+    "change": "exact copy"
+  },
+  {
+    "source": "coauthor_docs/six_task_results_20260913/report_update/enrich_summaries.py",
+    "destination": "report_update/enrich_summaries.py",
+    "source_sha256": "d1f64f8ba36a123abc2f7c52d9180759a96a7a34568f7d6dcf004fca35f9fab0",
+    "change": "exact copy"
+  },
+  {
+    "source": "coauthor_docs/six_task_results_20260913/report_update/CONCEPT_REFERENCE.md",
+    "destination": "report_update/CONCEPT_REFERENCE.md",
+    "source_sha256": "52366164be7b2b7b79093fca65b5a418a124677da5a0327660ced63b945fddc6",
+    "change": "exact copy"
+  },
+  {
+    "source": "ot2_cluster_cbm_history_fast_v2_fix1_20260913/basic_retrain_contract_v1.py",
+    "destination": "data_preprocessing_cluster/preparation_helpers.py",
+    "source_sha256": "29c5cf993c689fbc8adbe8ae37bb8de7a3785e8d3a2f7af496e3b8d18c16f490",
+    "change": "Six function bodies extracted unchanged; only their standard-library imports retained"
+  }
+]

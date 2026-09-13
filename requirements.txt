@@ -1,0 +1,9 @@
+# Already present in the existing Cluster conda environment "ot2".
+# Preserve its working CUDA PyTorch/torchvision pair; no reinstall is required.
+torch
+torchvision
+numpy
+pandas
+scipy
+scikit-learn
+PyYAML

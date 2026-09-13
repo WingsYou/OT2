@@ -1,120 +1,84 @@
-# OT2: a guide to the model and experiments
+# OT2: multimodal prediction and clinical concept analysis
 
-This repository contains the AI-READI multimodal classification model and its modality-removal experiments. It has **nine modality inputs**, each summarized into a **256-dimensional vector**, followed by a small Transformer that combines them to predict a binary outcome.
+OT2 studies two linked questions using AI-READI data: which modalities a fitted classifier relies on, and which clinical concept channels carry changes in its predictions when an input is removed.
 
-The latest completed experiment is **Basic Clinical retraining**: only 23 basic patient-information columns are supplied to the Clinical branch, alongside the other eight modalities. [Current_Summary.md](Current_Summary.md) contains those results. Earlier full-Clinical models and their inference-time ablations are separate experiments.
+This repository contains the consolidated **six-task pipeline**: preprocessing, labels, train-only scaling, Full/Basic Clinical model training, original12 Concept Bottleneck Models (CBMs), modality ablation, concept-channel restoration, and validation/test reports. It replaces the earlier scripts on `main`; historical implementations and summaries remain available in Git history.
 
-## Where should I look first?
-
-| Question | File / starting point |
-|---|---|
-| Where are all the encoders assembled? | [Task2V2Model](task2_v2_model.py#L1172) |
-| How are the modalities combined? | [PresenceAwareFusion](task2_v2_model.py#L1099) |
-| Where is the classifier? | [BinaryTaskHead](task2_v2_model.py#L1158) |
-| What architecture and training settings were used? | [MoCA configuration](configs/task2_v2_moca_full_assets_v1.yaml), [CVD broad](configs/task2_v2_cvd_broad_full_assets_v1.yaml), [CVD strict](configs/task2_v2_cvd_strict_full_assets_v1.yaml) |
-| How do saved data become model inputs? | [task2_v2_dataset.py](task2_v2_dataset.py), [data_preprocessing/](data_preprocessing/) |
-| How is the model trained? | [train_task2_v2.py](train_task2_v2.py), [task2_v2_engine.py](task2_v2_engine.py) |
-| How is the current retraining experiment run? | [run_basic_retrain_v1.py](run_basic_retrain_v1.py) |
-| Where is leave-one-out implemented? | [analyze_basic_retrained_v1.py](analyze_basic_retrained_v1.py), using [analyze_modality_importance_v2.py](analyze_modality_importance_v2.py) |
-
-The settings below follow the three `full_assets_v1.yaml` configurations and the current Basic Clinical retraining path. The model class also supports a small CNN for testing; the reported experiment selects **ResNet-18** in its configuration.
-
-## The whole model
-
-A *token* here means a learned vector summarizing one input. A *mask* identifies which values or inputs are actually observed. A *CLS token* is a learned summary token whose final representation is used for prediction.
+## Model overview
 
 ```mermaid
 flowchart TD
-    C["Clinical: basic patient information"] --> CE["Clinical MLP"]
-    E["ECG waveform + numeric report"] --> EE["ECG encoder"]
-    L["Environment, activity, glucose sequences"] --> LE["Three separate temporal encoders"]
-    R["FLIO, OCT, OCTA, photography views"] --> RE["Shared retinal backbone + attention pooling"]
-    CE --> T["9 modality tokens, each 256-dimensional"]
-    EE --> T
-    LE --> T
-    RE --> T
-    T --> F["Fusion Transformer: 9 modality slots + 1 patient CLS token"]
-    F --> P["Patient representation: 256 dimensions"]
-    P --> H["Selected task head: one logit"]
-    H --> O["Sigmoid: binary prediction score"]
+    C["Full Clinical or Basic23 information"] --> CE["Mask-aware clinical MLP"]
+    E["12-lead ECG waveform + report values"] --> EE["Waveform Transformer + numeric encoder"]
+    T["Environment, activity and glucose sequences"] --> TE["Separate temporal encoders"]
+    R["FLIO, OCT, OCTA and photography"] --> RE["Shared frozen ResNet18 + learned pooling"]
+    CE --> F["Nine modality vectors → fusion Transformer"]
+    EE --> F
+    TE --> F
+    RE --> F
+    F --> H["Task classifier"]
+    F --> Z["Freeze the trained Basic model's fusion representation"]
+    Z --> CB["Predict 12 labeled clinical concepts"]
+    CB --> CH["CBM task classifier"]
 ```
 
-## What does each encoder do?
+Each modality produces a 256-dimensional vector. The fusion Transformer combines the nine modality slots with a patient summary token. Each task has independently fitted Full Clinical and Basic Clinical models. **Basic23** means 23 encoded columns covering age-related information, education, marital status and language; the other eight modalities remain available.
 
-All branches produce one 256-dimensional vector per participant. The temporal and fusion Transformers use **2 layers, 4 attention heads, a feed-forward width of 512, GELU activation, and dropout 0.2**.
+The CBM is a separate readout of the trained Basic model's frozen fusion representation. Its concept predictor and classification head are jointly trained after sequential warmup (`lambda=1`, with a concept-alignment selection constraint). There is no latent or Basic Clinical bypass around the concept layer. The multimodal encoders/fusion are not jointly updated during this CBM stage.
 
-| Modality / code name | Input and encoder | Implementation |
-|---|---|---|
-| Clinical — `clinical_data` | Scaled feature values plus observation masks → MLP | [MaskAwareVectorEncoder](task2_v2_model.py#L298) |
-| ECG — `cardiac_ecg` | Parallel 12-lead waveform → waveform-patch Transformer; 8 report values → MLP; combine the two outputs | [ECGEncoder](task2_v2_model.py#L555), [MaskedWaveformPatchEncoder](task2_v2_model.py#L471) |
-| Environment — `environment` | Multichannel 5-minute sequence → patch summaries → Transformer | [MaskedTemporalPatchEncoder](task2_v2_model.py#L338) |
-| Activity — `wearable_activity_monitor` | Activity sequence on a 5-minute grid → patch summaries → Transformer | [MaskedTemporalPatchEncoder](task2_v2_model.py#L338) |
-| Glucose — `wearable_blood_glucose` | CGM sequence on a 5-minute grid → patch summaries → Transformer | [MaskedTemporalPatchEncoder](task2_v2_model.py#L338) |
-| Four retinal modalities — `retinal_flio`, `retinal_oct`, `retinal_octa`, `retinal_photography` | Prepared 2-D views → shared ResNet-18 → attention pooling → **four separate modality vectors** | [HierarchicalRetinalEncoder](task2_v2_model.py#L951) |
+## Where to find each component
 
-### Clinical
-
-For `F` features, the encoder concatenates `F` scaled values and `F` observation indicators, then applies:
-
-`2F → Linear(512) → LayerNorm → GELU → Dropout → Linear(256) → LayerNorm`
-
-In the current experiment, `F = 23`, so the first linear layer receives **46 inputs**. The retained columns represent age-related information (3), education (9), marital status (5), and language background (6). These are encoded columns, not 23 independent clinical measurements. The exact selection is in [clinical_basic_information_v1.py](clinical_basic_information_v1.py).
-
-[prepare_basic_clinical_training_v1.py](prepare_basic_clinical_training_v1.py) physically projects the Clinical table and scaler to these 23 columns and creates `train_config.yaml`. Retained training-set scaler parameters are copied without refitting. In earlier full-Clinical experiments, `F` was larger and task-specific.
-
-### ECG: leads and time are different axes
-
-One record has shape **`T × 12`**: `T` time samples, with 12 simultaneously recorded lead channels at each sample.
-
-The waveform encoder divides the time axis into non-overlapping **100-sample patches**. Each patch contains `100 × 12` values plus their validity masks. These are flattened to **2,400 inputs** and projected to 256 dimensions. This preserves within-patch sample order before compression. Sinusoidal positional encoding and a CLS token are added before temporal attention.
-
-For example, a 5,500-sample record at 500 Hz spans 11 seconds and gives 55 waveform patches, plus one CLS token. The implementation permits other record lengths; preprocessing preserves native sampling frequency and duration by default unless explicitly configured otherwise.
-
-The eight numeric report fields are **Rate, PR, QRSD, QT, QTc, P, QRS, T**. Their values and masks pass through a separate MLP. The two 256-dimensional outputs and two availability flags are concatenated into 514 inputs, then mapped `514 → 256 → 256` to form the ECG token. Removing ECG removes both waveform and report information. See [ECG preprocessing](data_preprocessing/build_ecg_waveform_features_v2.py).
-
-### Environment and wearable sequences
-
-Each encoder groups **12 consecutive 5-minute slots** into a one-hour patch. For each channel it computes the mean of observed values and the fraction of observed slots, projects these summaries to 256 dimensions, adds sinusoidal positions and a CLS token, and applies the temporal Transformer.
-
-These patches summarize values within the hour; the ECG patch encoder instead exposes individual samples to its projection. Environment, activity and CGM have the same encoder design but **separate weights**. Their channel counts come from the fitted schemas/scalers.
-
-### Retinal images
-
-An *asset* is an indexed acquisition/product; a *view* is a prepared 2-D image from that asset. The model input has shape `batch × assets × views × 3 × 224 × 224`.
-
-All four retinal modalities share an **ImageNet-1K pretrained ResNet-18**, whose classification layer is removed. Its weights and batch-normalization statistics remain frozen. Each view produces 512 features, projected to 256 dimensions. Learned attention pooling combines **views into assets**, then **assets into a modality vector**. The view projection and view pooling are shared; asset pooling and the final projection are specific to each retinal modality. These projection/pooling layers are trainable.
-
-The model consumes the saved `model_views`: photographs, selected central OCT/OCTA slices or OCTA en-face products, and FLIO-derived intensity/mean-bin views. The FLIO mean-bin feature is a photon-weighted frame index, **not a fitted physical fluorescence lifetime**. The full FLIO decay cube is not passed to this CNN. See [retinal preprocessing](data_preprocessing/preprocess_retinal_assets_v2.py) and [compact model-view files](build_retinal_model_view_sidecars_v2.py).
-
-## Fusion and prediction
-
-[PresenceAwareFusion](task2_v2_model.py#L1099) receives `batch × 9 × 256` modality tokens and nine presence indicators. It replaces an unavailable modality with that modality's learned missing vector, adds learned modality-identity embeddings, and prepends a patient CLS token. The **10-token sequence** passes through the fusion Transformer. The normalized patient CLS output is the 256-dimensional patient representation.
-
-Missing slots remain in the fusion sequence. Their learned vectors indicate absence; they do not reconstruct the participant's missing measurement.
-
-The selected [BinaryTaskHead](task2_v2_model.py#L1158) applies `256 → Linear(256) → GELU → Dropout → Linear(1)`. Evaluation applies a sigmoid to the logit. Although the class contains three task heads, the reported workflow **trains a separate model per task**, using that task's labels and head; it does not jointly optimize all three outcomes.
-
-## Training and modality importance
-
-The current experiment uses seed 42, AdamW, learning rate `5e-5`, weight decay `0.01`, batch size 2, gradient accumulation over 16 batches, and BF16. The schedule uses 10% linear warmup followed by cosine decay. Binary cross-entropy uses a positive-class weight estimated from training labels. Training lasts at most 30 epochs, with early stopping after 7 epochs without validation AUROC improvement. The best checkpoint and the Youden classification threshold are selected using validation data. The current report contains no test evaluation.
-
-Leave-one-out freezes that checkpoint, disables one modality, and measures the change on the same participants. It also removes all retinal inputs, both wearable inputs, or all eight nonclinical inputs together. Source tokens are cached to avoid repeatedly encoding images and sequences; the cached baseline is checked against the full forward pass. Fusion and the task head are recomputed after changing availability.
-
-Positive AUROC degradation means `AUROC_before − AUROC_after > 0`. The report includes 2,000 paired, outcome-stratified bootstrap resamples and availability subgroups. These are model-reliance estimates; the intervals do not include training-seed uncertainty or multiplicity correction. Ablation does not train a new reduced-input model or establish reconstruction performance.
-
-## Which files belong to which experiment?
-
-| Experiment | Main files / result |
+| Component | Implementation |
 |---|---|
-| Original full-Clinical supervised models | [train_task2_v2.py](train_task2_v2.py), the three `full_assets_v1.yaml` configurations |
-| Frozen-model Clinical/domain removals | [analyze_domain_ablation_v1.py](analyze_domain_ablation_v1.py), [analyze_clinical_abcd_v1.py](analyze_clinical_abcd_v1.py); `SUMMARY_val*.md` / `SUMMARY_test*.md` |
-| **Current: Basic Clinical retraining + ablation** | [prepare_basic_clinical_training_v1.py](prepare_basic_clinical_training_v1.py) → [train_basic_clinical_v1.py](train_basic_clinical_v1.py) → [analyze_basic_retrained_v1.py](analyze_basic_retrained_v1.py); [Current_Summary.md](Current_Summary.md) |
-| Separate universal reconstruction implementation | [task2_v2_universal_reconstruction.py](task2_v2_universal_reconstruction.py), [train_universal_reconstruction_v2.py](train_universal_reconstruction_v2.py), [evaluate_universal_reconstruction_v2.py](evaluate_universal_reconstruction_v2.py) |
+| Clinical encoder | [`MaskAwareVectorEncoder`](vendor/task2_v2_model.py#L298) |
+| Environment, activity and glucose encoders | [`MaskedTemporalPatchEncoder`](vendor/task2_v2_model.py#L338) |
+| ECG waveform and numeric encoder | [`MaskedWaveformPatchEncoder`](vendor/task2_v2_model.py#L471), [`ECGEncoder`](vendor/task2_v2_model.py#L555) |
+| Four retinal modality representations | [`HierarchicalRetinalEncoder`](vendor/task2_v2_model.py#L951); frozen CNN caching in [`data.py`](data.py), learned pooling in [`train.py`](train.py) |
+| Multimodal fusion and model assembly | [`PresenceAwareFusion`](vendor/task2_v2_model.py#L1099), [`Task2V2Model`](vendor/task2_v2_model.py#L1172) |
+| Full/Basic fitting and modality ablation | [`train.py`](train.py), [`common.py`](common.py) |
+| Concept prediction, joint CBM and restoration | [`concepts.py`](concepts.py), [`vendor/cbm_joint_v2.py`](vendor/cbm_joint_v2.py) |
+| Concept IDs, measurements and groups | [Concept reference](report_update/CONCEPT_REFERENCE.md), [original12 specification](data_preprocessing_cluster/configs/cbm_concepts_v1.json) |
+| Raw preprocessing and label preparation | [`data_preprocessing_cluster/`](data_preprocessing_cluster/), [`prepare_study_inputs.py`](prepare_study_inputs.py) |
+| GPU scheduling and reports | [`run.py`](run.py), [`worker.py`](worker.py), [`report.py`](report.py) |
 
-The universal reconstruction code predicts missing **latent modality tokens** from observed tokens. It is a separate experimental path and was not used to obtain `Current_Summary.md`. Its presence in the repository does not demonstrate completed reconstruction experiments.
+## Tasks and outputs
 
-This repository is a code/results snapshot for collaborators. Running it requires the cluster data, fitted scalers, schemas and checkpoints referenced by the configurations. Release verification scripts additionally expect their distribution manifests, which are not included at this repository root.
+The six binary tasks are **MoCA < 26, CVD broad, CVD strict, osteoporosis history, kidney-problem history, and lung-problem history**. Their definitions are in the [original task config](data_preprocessing_cluster/configs/downstream_tasks.json) and [history task config](data_preprocessing_cluster/configs/history_tasks_v1.json). The latter retains seven audited candidate outcomes; only the three history outcomes above are trained here.
 
-## Short Methods draft for the current experiment
+Four tables are generated separately for validation and test, reporting **AUROC, balanced accuracy and positive-class F1**, with paired bootstrap intervals for effects:
 
-We trained separate binary classifiers for MoCA impairment, broad CVD and strict CVD using nine AI-READI modalities. The Clinical input was restricted to 23 encoded basic-information features. Modality-specific encoders produced 256-dimensional representations: a mask-aware multilayer perceptron for Clinical features, a waveform-patch Transformer combined with a numeric-report encoder for ECG, separate temporal Transformers for environment and wearable sequences, and a shared frozen ImageNet-pretrained ResNet-18 with hierarchical attention pooling for retinal views. A two-layer, four-head Transformer fused the nine modality representations with a patient summary token, using learned vectors for missing modalities. A task-specific multilayer perceptron generated the classification logit. Models were optimized with class-weighted binary cross-entropy, and checkpoint and threshold selection used validation data. We assessed modality reliance by freezing each selected model and comparing predictions before and after modality removal on paired validation participants.
+| Table | Comparison |
+|---|---|
+| 1 | Full Clinical model; that model with only Basic Clinical retained at inference; retrained Basic Clinical model |
+| 2 | Basic model ablation: each of nine modalities, all retinal, all wearable, and all eight nonclinical inputs |
+| 3 | Basic multimodal classifier versus its original12 CBM readout |
+| 4 | Predicted concept-group restoration after source removal; top three groups selected on validation and held fixed on test |
+
+Table 4 restores a participant's concept channels predicted with complete inputs. It identifies model pathways; it does **not** implement a deployable missing-modality reconstruction algorithm or establish causal clinical effects. Thresholds and checkpoints are selected on validation. Earlier test results have already been examined in this project, so the test set should not be described as a previously untouched confirmatory cohort.
+
+## Run on the Cluster
+
+Reuse the existing `ot2` conda environment and processed inputs. Check input paths in [`study.yaml`](study.yaml) and [`configs/`](configs/). In a job allocated four H100 GPUs:
+
+```bash
+git clone https://github.com/WingsYou/OT2.git
+cd OT2
+conda activate ot2
+python -u pipeline.py train --devices 0 1 2 3 \
+  --output-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913
+```
+
+This command fits fresh models from existing processed data. It does not rerun raw preprocessing. Four GPUs run independent jobs, sharing cached frozen retinal features; ablation reuses source tokens and bootstrap calculations are batched on GPU. Use a new output directory when changing code or experimental settings.
+
+To regenerate reports for an already completed run without training:
+
+```bash
+python -u pipeline.py report \
+  --study-config /path/to/completed_run/runtime.yaml
+```
+
+Reports are written to `<output_root>/tables/SUMMARY_val.md` and `SUMMARY_test.md`, with CSV tables, concept definitions and F1 operating-point details. No patient data, participant predictions, checkpoints or pretrained weights are included in this repository.
+
+For preparation from raw data, fill in the actual manifest paths in [`pipeline.yaml`](pipeline.yaml) and follow [PREPARATION.md](PREPARATION.md). The [detailed Cluster guide](CLUSTER_GUIDE.md) describes the experiment definitions, defaults and recovery behavior. Dependencies are listed in [requirements.txt](requirements.txt) and [requirements-all.txt](requirements-all.txt); preserve the working CUDA PyTorch/torchvision installation.
+
+Local integration checks used synthetic data. The consolidated raw-to-report workflow has not been executed on the real Cluster dataset as a single run; existing processed outputs remain the default input for current experiments.
