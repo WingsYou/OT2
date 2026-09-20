@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from cbm_readout_v1 import _targets, array, ordered_labels, validate_cache_pair, validate_schema
+from cbm_readout_v1 import _targets, array, ordered_labels, validate_schema
 
 DEFAULTS = {"seed": 42, "concept_epochs": 400, "head_epochs": 300, "joint_epochs": 300,
     "patience": 40, "learning_rate": 0.001, "weight_decay": 0.0001,
@@ -15,7 +15,8 @@ DEFAULTS = {"seed": 42, "concept_epochs": 400, "head_epochs": 300, "joint_epochs
 
 
 def prepare(train, val, labels, schema):
-    validate_cache_pair(train, val)
+    # This readout uses embeddings/labels only, for either Full or Basic Clinical.
+    # The older readout's cache contract requires exactly 23 clinical columns.
     concepts = validate_schema(schema)
     frames = [ordered_labels(labels, c["person_ids"], concepts) for c in (train, val)]
     x = array(train["embedding"]).astype(np.float32)

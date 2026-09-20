@@ -26,6 +26,8 @@ Each modality produces a 256-dimensional vector. The fusion Transformer combines
 
 The CBM is a separate readout of the trained Basic model's frozen fusion representation. Its concept predictor and classification head are jointly trained after sequential warmup (`lambda=1`, with a concept-alignment selection constraint). There is no latent or Basic Clinical bypass around the concept layer. The multimodal encoders/fusion are not jointly updated during this CBM stage.
 
+The optional [Full Clinical CBM experiment](#full-clinical-cbm-and-clinical-information-removal) applies the same original12 readout to the frozen Full Clinical model and evaluates concept-channel restoration after removing nonbasic clinical information.
+
 ## Where to find each component
 
 | Component | Implementation |
@@ -78,6 +80,36 @@ python -u pipeline.py report \
 ```
 
 Reports are written to `<output_root>/tables/SUMMARY_val.md` and `SUMMARY_test.md`, with CSV tables, concept definitions and F1 operating-point details. No patient data, participant predictions, checkpoints or pretrained weights are included in this repository.
+
+## Full Clinical CBM and clinical-information removal
+
+For an **already completed six-task run**, pull this repository and launch:
+
+```bash
+git pull --ff-only
+conda activate ot2
+python -u run_full_clinical_cbm.py \
+  --source-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913 \
+  --devices 0 1 2 3
+```
+
+Set `--source-root` to your actual completed result directory, the one containing `runtime.yaml`, `inputs.json`, `cache/`, and the six task folders. If you used the default in `study.yaml`, it is `/data/pzhao3/ot2_output/six_task_study_v1_20260913`. The launcher reads that run's settings and concept-label paths automatically. It does not rerun preprocessing or train the Full/Basic multimodal models.
+
+Each GPU processes one task at a time. Existing validation/test source tokens are reused; only clinical encoding and fusion are recomputed for the masked condition. Full-model training embeddings are exported once when absent. Concept training uses the existing GPU implementation, and confidence intervals use the same GPU-batched bootstrap. Completed tasks and saved CBM checkpoints are reused when the same command is rerun. The new launcher does not compute or compare code/file SHA hashes.
+
+The experiment keeps Basic23 and all eight nonclinical modalities, masks every other clinical value **and its observation indicator**, and evaluates the frozen Full Clinical CBM without refitting or threshold retuning. Seven concept groups are restored individually using the same participant's **full-input predicted concepts**. The six cardiometabolic concepts and all twelve concepts are also restored together. All-twelve restoration reproduces the full-input CBM prediction; this provides a complete-restoration reference. Validation selects the top three individual groups, and that ranking is fixed on test. The original12 definitions and concept-alignment selection constraint are unchanged.
+
+Outputs go to `<source-root>/full_clinical_cbm/`, separately from the earlier results:
+
+- `tables/SUMMARY_FULL_CBM_val.md` and `SUMMARY_FULL_CBM_test.md`: classification, removal degradation, group recovery, and concept definitions.
+- `tables/classification_*.csv`, `degradation_*.csv`, `restoration_*.csv`, and `top3_*.csv`: AUROC, balanced accuracy and positive-class F1, paired intervals, full/masked/restored metrics, and remaining gaps.
+- `<task>/`: CBM checkpoints, training logs, participant predictions, full/masked concept predictions and selected settings; `logs/`: per-task console logs.
+
+The comparison includes the existing Basic Clinical and Basic Clinical + CBM results when present. Sequential Full Clinical CBM results are retained in the detailed classification CSVs; the main report uses joint lambda=1 with the original sequential fallback. All comparisons use the entire labeled split and report how many participants actually had observed nonbasic clinical features.
+
+Optional arguments are `--tasks moca_binary cvd_broad_binary`, `--output-root /path/to/new/results`, `--bootstrap-samples 2000`, and `--report-only`. Use another output directory for a changed experiment; resume an interrupted run with the original command. No additional packages are required beyond the existing environment.
+
+Full Clinical inputs contain information used to define the concept labels. This extension evaluates how that information passes through a concept bottleneck and what happens when it is removed. It does not establish recovery from independent nonclinical inputs: restored channels use the unavailable full-input prediction as a diagnostic reference, as in the previous restoration experiment.
 
 For preparation from raw data, fill in the actual manifest paths in [`pipeline.yaml`](pipeline.yaml) and follow [PREPARATION.md](PREPARATION.md). The [detailed Cluster guide](CLUSTER_GUIDE.md) describes the experiment definitions, defaults and recovery behavior. Dependencies are listed in [requirements.txt](requirements.txt) and [requirements-all.txt](requirements-all.txt); preserve the working CUDA PyTorch/torchvision installation.
 
