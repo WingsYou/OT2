@@ -137,6 +137,30 @@ Comparators are the original Full Clinical classifier and, when available, the p
 
 Rerun the same command to reuse completed tasks. Add `--report-only` to regenerate summaries, or `--tasks moca_binary cvd_broad_binary` to run a subset. Use a separate `--output-root` when changing experiment settings. This experiment tests mixed-input training of a frozen-representation CBM; it does not yet fine-tune fusion or compare against a non-CBM classifier trained with the same masking.
 
+## Concept restoration after mixed training
+
+After the mixed-training run completes, evaluate concept restoration with its saved checkpoint:
+
+```bash
+git pull --ff-only
+conda activate ot2
+python -u run_full_clinical_cbm.py \
+  --source-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913 \
+  --mixed-restoration --devices 0 1 2 3
+```
+
+Use your previous six-task `--source-root`. This mode reads `<source-root>/mixed_clinical_cbm/runtime.yaml`, reuses its saved settings and masked-feature cache paths, and **does not train any model or rerun preprocessing/encoders/fusion**. If your mixed-training output is elsewhere, supply `--mixed-cbm-root /path/to/completed/mixed_results`. `--mixed-restoration` replaces `--mixed-training`; they are separate modes.
+
+For each task, the selected mixed-training CBM predicts concepts from the cached full and masked embeddings. Starting from the masked prediction, each of the seven concept groups is replaced separately with the same participant's **full-input prediction from that same mixed-training model**. The six cardiometabolic concepts and all twelve concepts are restored together in two additional conditions. The saved **masked-validation threshold** stays fixed across full, masked and restored predictions. Validation ranks the seven individual groups; test retains that ranking. All six tasks are evaluated on both splits using the whole labeled cohort. No measured concept labels are needed, including for test.
+
+Results are written separately to `<source-root>/mixed_clinical_cbm_restoration/`:
+
+- `tables/SUMMARY_MIXED_RESTORATION_val.md` and `SUMMARY_MIXED_RESTORATION_test.md`: same-model full/masked performance and initial gaps, followed by absolute restored AUROC/balanced accuracy/F1 and paired recovery intervals for every group.
+- `tables/classification_*.csv`, `degradation_*.csv`, `restoration_*.csv`, `top3_*.csv`: detailed effects, validation ranks and remaining gaps.
+- Per-task predictions, full/masked bottleneck values, selected settings and console logs.
+
+The selected sequential fallback is reused when joint training did not yield an accepted update. This diagnostic uses an unavailable full-input reference at deployment; it is not measured-concept correction or autonomous reconstruction. All-twelve restoration equals the full-input decision by construction. After successful masked training, a smaller remaining gap or negative recovery is possible and should be reported rather than treated as a failed run. Resume with the same command; use `--report-only` to regenerate reports.
+
 For preparation from raw data, fill in the actual manifest paths in [`pipeline.yaml`](pipeline.yaml) and follow [PREPARATION.md](PREPARATION.md). The [detailed Cluster guide](CLUSTER_GUIDE.md) describes the experiment definitions, defaults and recovery behavior. Dependencies are listed in [requirements.txt](requirements.txt) and [requirements-all.txt](requirements-all.txt); preserve the working CUDA PyTorch/torchvision installation.
 
 Local integration checks used synthetic data. The consolidated raw-to-report workflow has not been executed on the real Cluster dataset as a single run; existing processed outputs remain the default input for current experiments.
