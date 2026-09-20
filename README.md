@@ -111,6 +111,32 @@ Optional arguments are `--tasks moca_binary cvd_broad_binary`, `--output-root /p
 
 Full Clinical inputs contain information used to define the concept labels. This extension evaluates how that information passes through a concept bottleneck and what happens when it is removed. It does not establish recovery from independent nonclinical inputs: restored channels use the unavailable full-input prediction as a diagnostic reference, as in the previous restoration experiment.
 
+## Train on full + masked inputs; deploy with masked inputs
+
+This minimal follow-up trains **one shared CBM** on both input conditions, with equal weight for each participant's full and masked views. It keeps the original Full Clinical encoders **and fusion frozen**, and updates only the original12 concept predictor and its classifier. Unlike the restoration experiment, evaluation predicts every concept from the masked input itself.
+
+```bash
+git pull --ff-only
+conda activate ot2
+python -u run_full_clinical_cbm.py \
+  --source-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913 \
+  --mixed-training --devices 0 1 2 3
+```
+
+Use the same `--source-root` as in your previous experiment. Existing Full Clinical CBM caches are reused from `<source-root>/full_clinical_cbm`; if those results are elsewhere, supply `--full-cbm-root /path/to/previous/full_cbm_results`. Only masked **training** embeddings need to be added when the previous caches are complete. Both input views retain Basic23 and the eight nonclinical modalities; the masked view additionally zeros all other clinical values and their observation indicators.
+
+The two training views share the same task label and observed concept targets. Their losses are averaged equally in concept warmup, classifier warmup and joint training (`lambda=1`). Missing concept targets remain masked. Embedding scaling is fitted to full training embeddings, and concept scaling to observed training labels, as before. Checkpoint selection, the existing 10% concept-alignment constraint, and Youden-threshold selection now use **masked validation**. Test evaluation uses only masked inputs and the fixed validation thresholds. There is no teacher prediction substitution, measured-concept injection, or full-input reference at inference.
+
+The run fits fresh CBM readouts on the existing backbone, schedules one task per GPU, and uses the same batched bootstrap. It writes separate results to `<source-root>/mixed_clinical_cbm/`:
+
+- `tables/SUMMARY_MIXED_CBM_val.md` and `SUMMARY_MIXED_CBM_test.md`: masked-only performance and paired improvements, plus concept prediction accuracy wherever measured labels are available.
+- `tables/classification_*.csv`, `gains_*.csv`, `concept_metrics_*.csv`: AUROC, balanced accuracy, F1, paired intervals, and per-concept errors.
+- `<task>/models.pt`, `training.csv`, `selection.json`, `predictions_*.csv`, `masked_concepts_*.npz`; and per-task logs under `logs/`.
+
+Comparators are the original Full Clinical classifier and, when available, the previous Full-only-trained CBM, both evaluated with masked inputs. Their thresholds are reselected using masked validation, so balanced accuracy/F1 can differ from the earlier report that kept full-input thresholds. The original comparator checkpoints are reused unchanged. The mixed sequential checkpoint is also retained in the detailed CSVs; the main table uses joint lambda=1 with sequential fallback.
+
+Rerun the same command to reuse completed tasks. Add `--report-only` to regenerate summaries, or `--tasks moca_binary cvd_broad_binary` to run a subset. Use a separate `--output-root` when changing experiment settings. This experiment tests mixed-input training of a frozen-representation CBM; it does not yet fine-tune fusion or compare against a non-CBM classifier trained with the same masking.
+
 For preparation from raw data, fill in the actual manifest paths in [`pipeline.yaml`](pipeline.yaml) and follow [PREPARATION.md](PREPARATION.md). The [detailed Cluster guide](CLUSTER_GUIDE.md) describes the experiment definitions, defaults and recovery behavior. Dependencies are listed in [requirements.txt](requirements.txt) and [requirements-all.txt](requirements-all.txt); preserve the working CUDA PyTorch/torchvision installation.
 
 Local integration checks used synthetic data. The consolidated raw-to-report workflow has not been executed on the real Cluster dataset as a single run; existing processed outputs remain the default input for current experiments.

@@ -38,12 +38,13 @@ def masked_clinical_features(model,cache,basic,task,device,batch_size):
     return {'embedding':torch.cat(embeddings),'original_logits':torch.cat(logits),'affected':affected}
 
 
-def feature_caches(task,cfg,device,root):
+def feature_caches(task,cfg,device,root,include_masked_train=False):
     from train import CachedModel,CachedDataset,clinical_inputs,loader,export
     source=Path(cfg['output_root']);full=source/task/'full'
     original={s:full/f'features_{s}.pt' for s in ('train','val','test')}
     train_path=original['train'] if original['train'].exists() else root/'features_train.pt'
-    mask_paths={s:root/f'basic_inference_{s}.pt' for s in ('val','test')}
+    splits=('train','val','test') if include_masked_train else ('val','test')
+    mask_paths={s:root/f'basic_inference_{s}.pt' for s in splits}
     if not train_path.exists() or any(not p.exists() for p in mask_paths.values()):
         checkpoint=load(full/'best.pt')
         # Every CNN parameter comes from this checkpoint; no pretrained download.
@@ -61,7 +62,7 @@ def feature_caches(task,cfg,device,root):
         for split,path in mask_paths.items():
             if not path.exists():
                 print(f'[features] {task}/{split}: cached tokens → masked clinical → fusion',flush=True)
-                result=masked_clinical_features(model,load(original[split]),basic,task,device,cfg['batch_size'])
+                result=masked_clinical_features(model,load(train_path if split=='train' else original[split]),basic,task,device,cfg['batch_size'])
                 save_torch(path,result)
         del model
         if device.type=='cuda':torch.cuda.empty_cache()

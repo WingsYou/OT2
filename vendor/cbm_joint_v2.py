@@ -152,7 +152,14 @@ def fit_phase(model, train, val, *, phase, config, strength=0., reference=None):
         "selected_score": best_score, "status": "no_accepted_joint_update" if phase == "joint" and best_epoch == 0 else "fitted"}, history
 
 
-def fit_experiment(train, val, labels, schema, *, config=None, device="cpu"):
+def paired_training_data(data, masked_embedding, spec):
+    """Two input views, one participant's labels; mean losses weight views equally."""
+    x = (array(masked_embedding)-np.asarray(spec['x_mean']))/np.asarray(spec['x_std'])
+    return {key: torch.cat((value, torch.tensor(x, dtype=value.dtype) if key == 'x' else value), dim=0)
+            for key, value in data.items()}
+
+
+def fit_experiment(train, val, labels, schema, *, config=None, device="cpu", masked_train_embedding=None):
     cfg = dict(DEFAULTS if config is None else config)
     if set(cfg) != set(DEFAULTS) or cfg["hidden_width"] < 1 or cfg["patience"] < 1:
         raise ValueError("Invalid training contract")
@@ -165,6 +172,8 @@ def fit_experiment(train, val, labels, schema, *, config=None, device="cpu"):
         torch.cuda.manual_seed_all(cfg["seed"])
     torch.use_deterministic_algorithms(True)
     spec, data = prepare(train, val, labels, schema)
+    if masked_train_embedding is not None:
+        data[0] = paired_training_data(data[0], masked_train_embedding, spec)
     data = [{k: v.to(device) for k, v in split.items()} for split in data]
     model = JointCBM(spec, cfg["hidden_width"]).to(device)
     concept_info, history = fit_phase(model, *data, phase="concept", config=cfg)
@@ -177,6 +186,9 @@ def fit_experiment(train, val, labels, schema, *, config=None, device="cpu"):
         "backbone_frozen": True, "direct_basic_path": False, "latent_bypass": False,
         "concept_warmup": concept_info, "head_warmup": head_info,
         "reference_val_concept_losses": reference.tolist()}
+    if masked_train_embedding is not None:
+        common.update(training_views=['full', 'nonbasic_clinical_masked'], training_view_weights=[0.5, 0.5],
+                      selection_input='nonbasic_clinical_masked', inference_input='nonbasic_clinical_masked')
     artifacts = {"sequential": {**common, "state_dict": _state(model), "arm": "sequential",
         "selection": head_info, "lambda": None}}
     initial = _state(model)
