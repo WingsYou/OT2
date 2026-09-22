@@ -82,4 +82,16 @@ task_specific_four_survey_cbm_v1/
 
 The four summaries include AUROC, balanced accuracy, F1, actual concept coverage, selected training status, single-ID restoration and top-three joint restoration. Detailed CSVs contain all validation IDs and all Basic modality-removal conditions. To regenerate reports, rerun the command with `--report-only`.
 
+### Print the top 10 concepts without rerunning experiments
+
+```bash
+python print_concept_top.py \
+  --result-root /data/pzhao3/ot2_output/six_task_study_v1_20260913/task_specific_four_survey_cbm_v1 \
+  --top-k 10
+```
+
+This standard-library-only script reads saved validation results, prints both Basic and Mixed rankings, and saves `tables/TOP10_CONCEPT_ID_basic_val.md` and `tables/TOP10_CONCEPT_ID_mixed_val.md`. Tables include the official concept name, ID, all source fields, participant count, and AUROC/balanced-accuracy/F1 recoveries with intervals. It follows the existing validation AUROC ranking and keeps dates and negative recoveries. Basic uses each task's focal modality removal, matching the original summaries; add `--all-removals` for every saved removal. Change `--top-k` to show more IDs or use `--mode mixed` for one experiment.
+
+Validation already contains all IDs, so this requires no training, inference, GPU, or new bootstrap calculation. Test contains only the original validation-selected top three individual IDs; ranks 4–10 would need additional test evaluation using the fixed trained CBM. The script leaves the existing test selection and summaries unchanged.
+
 The previous all-entry experiment remains available with `--concept-bank all` (the existing default), using its original output directory. Full extraction and analysis details are in [INDIVIDUAL_CONCEPT_CBM.md](INDIVIDUAL_CONCEPT_CBM.md).
