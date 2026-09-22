@@ -62,6 +62,8 @@ Table 4 restores a participant's concept channels predicted with complete inputs
 
 For the new **task-specific concept bank**, running both Basic Clinical and full+masked CBMs on the existing trained models, see [INDIVIDUAL_CONCEPT_CBM.md](INDIVIDUAL_CONCEPT_CBM.md). Training retains separate source targets; restoration and ranking operate on **Concept IDs**, simultaneously replacing every channel belonging to the same ID. Validation/test reports are generated separately.
 
+For the follow-up that retains **only four Observation surveys**, with separate concept subsets for all six tasks, see [FOUR_SURVEY_CONCEPT_CBM.md](FOUR_SURVEY_CONCEPT_CBM.md). Use `--concept-bank four-surveys` to fit new Basic/Mixed CBMs in a separate result directory while reusing the trained multimodal backbones and caches.
+
 Reuse the existing `ot2` conda environment and processed inputs. Check input paths in [`study.yaml`](study.yaml) and [`configs/`](configs/). In a job allocated four H100 GPUs:
 
 ```bash

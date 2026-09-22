@@ -216,6 +216,15 @@ def run_task(task, cfg, device):
 def make_report(cfg):
     from report import markdown, number, interval
     output = Path(cfg['individual_root']); tables = output / 'tables'; tables.mkdir(exist_ok=True)
+    if cfg.get('concept_bank') == 'four-surveys':
+        from individual_concept_labels import FOUR_OBSERVATION_FORMS
+        scope = ('Task-specific outcome exclusions are applied. Observation source fields are restricted to '
+                 + ', '.join(FOUR_OBSERVATION_FORMS)
+                 + '. Measurement, Device, Condition and Procedure entries retain their task-specific exclusions. '
+                 'Dates, timestamps and metadata belonging to the retained surveys remain included. ')
+    else:
+        scope = ('Concepts follow TASK_SPECIFIC_CONCEPT_SUBSETS.xlsx, with only the approved task-specific outcome exclusions. '
+                 'Administrative fields, dates, identifiers and workflow items remain. ')
     for mode in cfg['individual_modes']:
         completed = [t for t in cfg['tasks'] if (analysis_dir(output, mode, t) / 'DONE.json').exists()]
         if not completed: continue
@@ -225,8 +234,7 @@ def make_report(cfg):
             for name, frame in frames.items(): frame[frame.split == split].to_csv(tables / f'{mode}_concept_id_{name}_{split}.csv', index=False)
             lines = [f'# Concept-ID CBM analysis ({mode}) — {split}', '',
                 f'Completed tasks: {len(completed)}/{len(cfg["tasks"])}. Seed {cfg["seed"]}.', '',
-                'Concepts follow TASK_SPECIFIC_CONCEPT_SUBSETS.xlsx, with only the approved task-specific outcome exclusions. '
-                'Administrative fields, dates, identifiers and workflow items remain. Restoration and ranking use Concept ID: '
+                scope + 'Restoration and ranking use Concept ID: '
                 'all source fields, qualifiers, units and categorical probability channels belonging to an ID are restored together. '
                 'Training targets and encodings remain separate; measurements are not averaged. No form pooling is used.', '',
                 ('One frozen Full Clinical backbone; one CBM trained on equal-weight full/masked views. Selection and deployment use masked inputs.' if mode == 'mixed' else
@@ -242,7 +250,7 @@ def make_report(cfg):
                       'Categorical items use a probability block, so channel count is not concept count. '
                       'Per-field concept prediction metrics retain their own units; they are not averaged across an ID. '
                       'concept_id_groups.json lists every member and channel of each ID. '
-                      'Shared generic IDs such as 2005200014 therefore represent the joint restoration of all task-allowed questions under that ID, not a single disease.', '', '## Classification', '']
+                      'A shared ID can include several source questions or repeated measurements; its recovery describes all retained members together.', '', '## Classification', '']
             classification = frames['classification']; restoration = frames['restoration']
             for metric in METRICS:
                 rows = []

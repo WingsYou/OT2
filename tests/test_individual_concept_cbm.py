@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from common import Bootstrap
-from individual_concept_labels import blocked, recorded_value
+from individual_concept_labels import blocked, recorded_value, load_bank, FOUR_OBSERVATION_FORMS
 from individual_concept_model import prepare, restore, predict, date_days
 from individual_concept_experiment import (metric_batch, restoration_batch, run_task, make_report,
                                            concept_id_groups, analysis_dir)
@@ -38,6 +38,34 @@ def fixture():
 
 
 class IndividualConceptTests(unittest.TestCase):
+    def test_four_survey_bank_keeps_source_scope_and_task_specific_labels(self):
+        original = load_bank()
+        bank = load_bank(observation_forms=FOUR_OBSERVATION_FORMS)
+        expected = {'moca_binary': 226, 'cvd_broad_binary': 221, 'cvd_strict_binary': 224,
+                    'osteoporosis_history_binary': 228, 'kidney_history_binary': 228, 'lung_history_binary': 228}
+        for task, count in expected.items():
+            policy = bank['tasks'][task]
+            items = [bank['concepts'][k] for k in policy['concept_keys']]
+            self.assertEqual(policy['inventory_ids'], count)
+            obs = [c for c in items if c['domain'] == 'Observation']
+            self.assertEqual(len({c['concept_id'] for c in obs}), 117)
+            self.assertEqual({c['form_name'] for c in obs}, set(FOUR_OBSERVATION_FORMS))
+            self.assertEqual(len(obs), 133)
+            self.assertEqual({c['source_field'] for c in obs if c['concept_id'] == '4160030'},
+                             {'pxsficmpdat', 'pxrdcmpdat', 'pxsdohcmpdat'})
+            for key in ('excluded_concept_ids', 'excluded_source_fields', 'excluded_source_patterns'):
+                self.assertEqual(policy[key], original['tasks'][task][key])
+            for c in items:
+                self.assertFalse(blocked(c['source_field'], {c['concept_id']}, policy))
+            self.assertEqual({c['source_field'] for c in items if c['concept_id'] == '3004249'},
+                             {'bp1_sysbp_vsorres', 'bp2_sysbp_vsorres'})
+        def fields(task):
+            return {bank['concepts'][k]['source_field'] for k in bank['tasks'][task]['concept_keys']}
+        self.assertNotIn('mhoccur_hbp', fields('cvd_broad_binary'))
+        self.assertIn('mhoccur_hbp', fields('cvd_strict_binary'))
+        self.assertNotIn('mhoccur_rnl', fields('kidney_history_binary'))
+        self.assertIn('mhoccur_rnl', fields('moca_binary'))
+
     def test_target_exclusions_and_missingness(self):
         p = {'excluded_source_fields': ['mhoccur_rnl'], 'excluded_source_patterns': ['moca'],
              'excluded_concept_ids': ['2005200017']}
@@ -79,7 +107,8 @@ class IndividualConceptTests(unittest.TestCase):
                 if split != 'train': torch.save({'retinal_all': missing}, basic/f'removals_{split}.pt')
             cfg = dict(output_root=str(source), individual_root=str(output), tasks=[task],
                        individual_modes=['basic','mixed'], seed=42, bootstrap_samples=20,
-                       concept_epochs=2, head_epochs=2, joint_epochs=2, concept_patience=2)
+                       concept_epochs=2, head_epochs=2, joint_epochs=2, concept_patience=2,
+                       concept_bank='four-surveys')
             for mode in cfg['individual_modes']:
                 cfg['individual_mode'] = mode
                 with patch('individual_concept_experiment.feature_caches', return_value=(paths, masks)):
@@ -125,6 +154,7 @@ class IndividualConceptTests(unittest.TestCase):
             summaries = list((output/'tables').glob('SUMMARY_CONCEPT_ID_*.md'))
             self.assertEqual(len(summaries), 4)
             self.assertTrue(all('Source fields restored together' in p.read_text() for p in summaries))
+            self.assertTrue(all('px_food_insecurity_survey' in p.read_text() for p in summaries))
 
 
 if __name__ == '__main__': unittest.main()

@@ -2,6 +2,8 @@
 
 This experiment uses **TASK_SPECIFIC_CONCEPT_SUBSETS.xlsx**, with all its retained entries and the approved outcome exclusions for each of the six tasks. It does not apply the suggested administrative/date exclusions. The original12 experiments remain available through their existing commands.
 
+The four-survey follow-up uses `--concept-bank four-surveys`; its task-specific inventories, command and separate output directory are documented in [FOUR_SURVEY_CONCEPT_CBM.md](FOUR_SURVEY_CONCEPT_CBM.md). Omitting this option retains the existing all-entry experiment.
+
 **Analysis now operates on Concept IDs.** Every field/channel associated with an ID is restored together. Training still predicts each source target separately, so the existing individual-bank CBM weights remain reusable. This is modality removal followed by Concept-ID restoration, not a new concept-deletion experiment.
 
 ## Cluster command
@@ -12,11 +14,11 @@ In the repository, inside your allocation of four H100 GPUs:
 git pull --ff-only
 conda activate ot2
 python -u run_individual_concept_cbm.py \
-  --source-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913 \
+  --source-root /data/pzhao3/ot2_output/six_task_study_v1_20260913 \
   --devices 0 1 2 3
 ```
 
-Set `--source-root` to the **actual completed six-task result folder**, containing `runtime.yaml`, `inputs.json`, and `<task>/basic/features_train.pt`, `features_val.pt`, `features_test.pt`, `removals_val.pt`, `removals_test.pt`. Full Clinical checkpoints/caches are read from the same run. If your completed run uses the other existing name, use `/data/pzhao3/ot2_output/six_task_study_v1_20260913` instead.
+Set `--source-root` to the **actual completed six-task result folder**, containing `runtime.yaml`, `inputs.json`, and `<task>/basic/features_train.pt`, `features_val.pt`, `features_test.pt`, `removals_val.pt`, `removals_test.pt`. Full Clinical checkpoints/caches are read from the same run.
 
 The default runs **both** experiments for all six tasks. One task/experiment runs per GPU; jobs fill the four GPUs as they become available. Use `--mode basic` or `--mode mixed` to run just one. The parent sets each worker's visible GPU, including inside a scheduler-provided GPU allocation.
 
@@ -102,7 +104,7 @@ To regenerate summaries without training:
 
 ```bash
 python -u run_individual_concept_cbm.py \
-  --source-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913 \
+  --source-root /data/pzhao3/ot2_output/six_task_study_v1_20260913 \
   --report-only
 ```
 
