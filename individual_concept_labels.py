@@ -16,6 +16,7 @@ FOUR_OBSERVATION_FORMS = (
     'px_racial_ethnic_discrimination_survey',
     'px_sdoh_combined_survey',
 )
+SURVEY_ADMIN_IDS = ('4160030', '2005200102', '2005200558', '2005200559')
 TABLES = {'observation.csv': 'observation', 'measurement.csv': 'measurement',
           'condition_occurrence.csv': 'condition', 'procedure_occurrence.csv': 'procedure'}
 
@@ -47,23 +48,28 @@ def recorded_value(row):
     return None, ''
 
 
-def load_bank(bank_path=BANK, observation_forms=None):
-    """Restrict Observation source fields while retaining each task's exclusions."""
+def load_bank(bank_path=BANK, observation_forms=None, excluded_ids=()):
+    """Restrict concept targets while retaining each task's outcome exclusions."""
     bank = json.loads(Path(bank_path).read_text())
     if observation_forms is not None:
         bank['observation_forms'] = list(observation_forms)
+    if excluded_ids:
+        bank['excluded_inventory_ids'] = list(excluded_ids)
+    if observation_forms is not None or excluded_ids:
         bank['concepts'] = {k: c for k, c in bank['concepts'].items()
-                            if c['domain'] != 'Observation' or c['form_name'] in observation_forms}
+                            if c['concept_id'] not in excluded_ids
+                            and (observation_forms is None or c['domain'] != 'Observation'
+                                 or c['form_name'] in observation_forms)}
         for policy in bank['tasks'].values():
             policy['concept_keys'] = [k for k in policy['concept_keys'] if k in bank['concepts']]
             policy['inventory_ids'] = len({bank['concepts'][k]['concept_id'] for k in policy['concept_keys']})
     return bank
 
 
-def extract(clinical_dir, output, bank_path=BANK, observation_forms=None):
+def extract(clinical_dir, output, bank_path=BANK, observation_forms=None, excluded_ids=()):
     """Read each local table once; retain source values and task-specific masks."""
     clinical_dir, output = Path(clinical_dir), Path(output)
-    bank = load_bank(bank_path, observation_forms)
+    bank = load_bank(bank_path, observation_forms, excluded_ids)
     with (clinical_dir / 'person.csv').open(newline='', encoding='utf-8-sig') as f:
         people = sorted({norm(r['person_id']) for r in csv.DictReader(f)})
     cohort = set(people)
@@ -147,6 +153,7 @@ def extract(clinical_dir, output, bank_path=BANK, observation_forms=None):
         schema = {'source_workbook': bank['source_workbook'], 'task': task, 'cohort_size': len(people),
                   'inventory_ids': policy['inventory_ids'], 'source_pairs': len(policy['concept_keys']),
                   'observation_forms': bank.get('observation_forms'),
+                  'excluded_inventory_ids': bank.get('excluded_inventory_ids', []),
                   'concepts': items, 'exclusions': {k: v for k, v in policy.items() if k.startswith('excluded_')}}
         (folder / 'schema.json').write_text(json.dumps(schema, indent=2) + '\n')
         print(f'[concept labels] {task}: {policy["inventory_ids"]} IDs, {len(items)} individual items', flush=True)
@@ -159,6 +166,8 @@ if __name__ == '__main__':
     parser.add_argument('--out-dir', type=Path, required=True)
     parser.add_argument('--bank', type=Path, default=BANK)
     parser.add_argument('--four-surveys', action='store_true', help='Restrict Observation to the four approved surveys')
+    parser.add_argument('--drop-survey-admin', action='store_true', help='Exclude the four specified survey date, timestamp and metadata IDs')
     args = parser.parse_args()
     extract(args.clinical_dir, args.out_dir, args.bank,
-            FOUR_OBSERVATION_FORMS if args.four_surveys else None)
+            FOUR_OBSERVATION_FORMS if args.four_surveys else None,
+            SURVEY_ADMIN_IDS if args.drop_survey_admin else ())

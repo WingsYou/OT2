@@ -216,12 +216,17 @@ def run_task(task, cfg, device):
 def make_report(cfg):
     from report import markdown, number, interval
     output = Path(cfg['individual_root']); tables = output / 'tables'; tables.mkdir(exist_ok=True)
-    if cfg.get('concept_bank') == 'four-surveys':
-        from individual_concept_labels import FOUR_OBSERVATION_FORMS
+    if cfg.get('concept_bank') in ('four-surveys', 'four-surveys-v2'):
+        from individual_concept_labels import FOUR_OBSERVATION_FORMS, SURVEY_ADMIN_IDS
         scope = ('Task-specific outcome exclusions are applied. Observation source fields are restricted to '
                  + ', '.join(FOUR_OBSERVATION_FORMS)
-                 + '. Measurement, Device, Condition and Procedure entries retain their task-specific exclusions. '
-                 'Dates, timestamps and metadata belonging to the retained surveys remain included. ')
+                 + '. Measurement, Device, Condition and Procedure entries retain their task-specific exclusions. ')
+        if cfg['concept_bank'] == 'four-surveys-v2':
+            scope += ('Excluded from all concept targets and restoration: ' + ', '.join(SURVEY_ADMIN_IDS)
+                      + ' (survey dates, metadata and timestamps). All source fields under these four IDs are removed. '
+                      'Other IDs keep their retained fields, including msscmpdat under Procedure ID 4047085. ')
+        else:
+            scope += 'Dates, timestamps and metadata belonging to the retained surveys remain included. '
     else:
         scope = ('Concepts follow TASK_SPECIFIC_CONCEPT_SUBSETS.xlsx, with only the approved task-specific outcome exclusions. '
                  'Administrative fields, dates, identifiers and workflow items remain. ')

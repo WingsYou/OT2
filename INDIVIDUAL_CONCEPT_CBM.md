@@ -2,7 +2,7 @@
 
 This experiment uses **TASK_SPECIFIC_CONCEPT_SUBSETS.xlsx**, with all its retained entries and the approved outcome exclusions for each of the six tasks. It does not apply the suggested administrative/date exclusions. The original12 experiments remain available through their existing commands.
 
-The four-survey follow-up uses `--concept-bank four-surveys`; its task-specific inventories, command and separate output directory are documented in [FOUR_SURVEY_CONCEPT_CBM.md](FOUR_SURVEY_CONCEPT_CBM.md). Omitting this option retains the existing all-entry experiment.
+The current four-survey follow-up uses `--concept-bank four-surveys-v2` and excludes the four specified survey date/timestamp/metadata IDs; its task-specific inventories, command and separate output directory are documented in [FOUR_SURVEY_CONCEPT_CBM.md](FOUR_SURVEY_CONCEPT_CBM.md). Omitting this option retains the existing all-entry experiment.
 
 **Analysis now operates on Concept IDs.** Every field/channel associated with an ID is restored together. Training still predicts each source target separately, so the existing individual-bank CBM weights remain reusable. This is modality removal followed by Concept-ID restoration, not a new concept-deletion experiment.
 

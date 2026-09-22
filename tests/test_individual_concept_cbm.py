@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from common import Bootstrap
-from individual_concept_labels import blocked, recorded_value, load_bank, FOUR_OBSERVATION_FORMS
+from individual_concept_labels import blocked, recorded_value, load_bank, FOUR_OBSERVATION_FORMS, SURVEY_ADMIN_IDS
 from individual_concept_model import prepare, restore, predict, date_days
 from individual_concept_experiment import (metric_batch, restoration_batch, run_task, make_report,
                                            concept_id_groups, analysis_dir)
@@ -66,6 +66,23 @@ class IndividualConceptTests(unittest.TestCase):
         self.assertNotIn('mhoccur_rnl', fields('kidney_history_binary'))
         self.assertIn('mhoccur_rnl', fields('moca_binary'))
 
+    def test_v2_removes_all_four_ids_and_only_their_targets(self):
+        old = load_bank(observation_forms=FOUR_OBSERVATION_FORMS)
+        new = load_bank(observation_forms=FOUR_OBSERVATION_FORMS, excluded_ids=SURVEY_ADMIN_IDS)
+        removed = {k for k, c in old['concepts'].items() if c['concept_id'] in SURVEY_ADMIN_IDS}
+        self.assertEqual(len(removed), 20)
+        self.assertEqual(set(old['concepts']) - set(new['concepts']), removed)
+        for task, policy in new['tasks'].items():
+            before = old['tasks'][task]
+            self.assertEqual(policy['inventory_ids'], before['inventory_ids'] - 4)
+            self.assertEqual(len(policy['concept_keys']), len(before['concept_keys']) - 20)
+            self.assertEqual(policy['concept_keys'], [k for k in before['concept_keys'] if k not in removed])
+            for key in ('excluded_concept_ids', 'excluded_source_fields', 'excluded_source_patterns'):
+                self.assertEqual(policy[key], before[key])
+        self.assertEqual({c['source_field'] for c in new['concepts'].values() if c['concept_id'] == '3004249'},
+                         {'bp1_sysbp_vsorres', 'bp2_sysbp_vsorres'})
+        self.assertIn('4047085__msscmpdat', new['concepts'])
+
     def test_target_exclusions_and_missingness(self):
         p = {'excluded_source_fields': ['mhoccur_rnl'], 'excluded_source_patterns': ['moca'],
              'excluded_concept_ids': ['2005200017']}
@@ -108,7 +125,7 @@ class IndividualConceptTests(unittest.TestCase):
             cfg = dict(output_root=str(source), individual_root=str(output), tasks=[task],
                        individual_modes=['basic','mixed'], seed=42, bootstrap_samples=20,
                        concept_epochs=2, head_epochs=2, joint_epochs=2, concept_patience=2,
-                       concept_bank='four-surveys')
+                       concept_bank='four-surveys-v2')
             for mode in cfg['individual_modes']:
                 cfg['individual_mode'] = mode
                 with patch('individual_concept_experiment.feature_caches', return_value=(paths, masks)):
@@ -155,6 +172,7 @@ class IndividualConceptTests(unittest.TestCase):
             self.assertEqual(len(summaries), 4)
             self.assertTrue(all('Source fields restored together' in p.read_text() for p in summaries))
             self.assertTrue(all('px_food_insecurity_survey' in p.read_text() for p in summaries))
+            self.assertTrue(all('Excluded from all concept targets and restoration: 4160030' in p.read_text() for p in summaries))
 
 
 if __name__ == '__main__': unittest.main()
