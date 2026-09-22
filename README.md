@@ -60,6 +60,8 @@ Table 4 restores a participant's concept channels predicted with complete inputs
 
 ## Run on the Cluster
 
+For the new **task-specific individual-concept bank**, running both Basic Clinical and full+masked CBMs on the existing trained models, see [INDIVIDUAL_CONCEPT_CBM.md](INDIVIDUAL_CONCEPT_CBM.md). This uses the approved workbook subsets without form/concept-group pooling and generates separate validation/test reports.
+
 Reuse the existing `ot2` conda environment and processed inputs. Check input paths in [`study.yaml`](study.yaml) and [`configs/`](configs/). In a job allocated four H100 GPUs:
 
 ```bash
