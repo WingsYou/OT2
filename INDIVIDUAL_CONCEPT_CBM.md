@@ -1,6 +1,8 @@
-# Task-specific individual-concept CBMs
+# Task-specific CBMs with Concept-ID restoration
 
 This experiment uses **TASK_SPECIFIC_CONCEPT_SUBSETS.xlsx**, with all its retained entries and the approved outcome exclusions for each of the six tasks. It does not apply the suggested administrative/date exclusions. The original12 experiments remain available through their existing commands.
+
+**Analysis now operates on Concept IDs.** Every field/channel associated with an ID is restored together. Training still predicts each source target separately, so the existing individual-bank CBM weights remain reusable. This is modality removal followed by Concept-ID restoration, not a new concept-deletion experiment.
 
 ## Cluster command
 
@@ -52,7 +54,15 @@ The runnable dictionary is [`configs/task_specific_concepts.json`](configs/task_
 | Kidney problems | 357 | 497 |
 | Lung problems | 357 | 497 |
 
-An individual item is **Concept ID + source field**, separated further if units or qualifiers differ. Thus two blood-pressure readings and the right/left eye values remain separate. Shared question ID `2005200014` is separated by disease source/qualifier. FORM_NAME is descriptive metadata; it never pools items. One categorical item can use multiple probability channels, which are always restored together. Aliases/overlapping question and response IDs from the approved inventory are retained and identifiable, rather than deduplicated into a clinical construct.
+An individual **training target** is Concept ID + source field, separated further if units or qualifiers differ. Values are not averaged. **Restoration and top-three selection operate on the ID alone**: all its source targets, contexts and categorical probability channels move together. FORM_NAME remains descriptive metadata and never defines a restoration group.
+
+| Restoration unit | Fields/channels replaced together |
+|---|---|
+| Systolic blood pressure — `3004249` | `bp1_sysbp_vsorres` and `bp2_sysbp_vsorres`, including any separate unit/context channels |
+| Diastolic blood pressure — `3012888` | `bp1_diabp_vsorres` and `bp2_diabp_vsorres` |
+| Shared history question — `2005200014` | All disease-history source questions retained for this task under this ID |
+
+The last row is deliberately a strict ID-level operation: a generic shared ID can bundle several different questions. Its recovery must not be interpreted as the importance of one disease. Likewise, distinct right/left eye IDs remain separate, even when their names describe related measurements. `concept_id_groups.json` lists the exact source members and channel indices for every ID. Aliases with different IDs remain separate under the approved inventory.
 
 - Every raw row is first filtered by that task's blocked source fields/patterns and blocked IDs in **any concept-ID column**, including disease qualifiers and response IDs. Only approved ID/source pairs are then extracted. Other tasks' nonexcluded history questions remain.
 - Numeric/categorical interpretation uses the source field's official type and actual training values. Dates are parsed from the local `M/D/YY H:MM` format (or ISO exports) and encoded in days; a date-like concept name alone does not make a value a date. Scalers and category vocabulary use training participants only. Missing units remain unspecified rather than being assigned a clinical unit.
@@ -70,19 +80,23 @@ Results are separate from old experiments:
 ```text
 <source-root>/task_specific_individual_cbm_v1/
   labels/<task>/labels.csv, schema.json, coverage.csv
-  basic/<task>/model.pt, training.csv, selection.json, ...
-  mixed/<task>/model.pt, training.csv, selection.json, ...
-  tables/SUMMARY_INDIVIDUAL_basic_val.md
-  tables/SUMMARY_INDIVIDUAL_basic_test.md
-  tables/SUMMARY_INDIVIDUAL_mixed_val.md
-  tables/SUMMARY_INDIVIDUAL_mixed_test.md
+  basic/<task>/model.pt, training.csv
+  mixed/<task>/model.pt, training.csv
+  basic/<task>/by_concept_id/selection.json, concept_id_groups.json, ...
+  mixed/<task>/by_concept_id/selection.json, concept_id_groups.json, ...
+  tables/SUMMARY_CONCEPT_ID_basic_val.md
+  tables/SUMMARY_CONCEPT_ID_basic_test.md
+  tables/SUMMARY_CONCEPT_ID_mixed_val.md
+  tables/SUMMARY_CONCEPT_ID_mixed_test.md
 ```
 
-Each summary reports **AUROC, balanced accuracy and positive-class F1**, item counts/status, and validation-selected top-three single-item restoration with paired 95% intervals. Validation evaluates every item separately; test evaluates those three, their joint combination, and all-item restoration. Selection always uses validation AUROC recovery. The Basic summary uses the previously specified focal removal for each task; detailed CSVs contain every single/family removal, the full validation screen and all per-item concept-prediction metrics. Per-task `concept_definitions.json` provides IDs, source questions, units, qualifiers and train-fitted encoding. Coverage distinguishes raw records from usable, conflicting and supported labels.
+Each summary reports **AUROC, balanced accuracy and positive-class F1**, item counts/status, and validation-selected top-three **distinct Concept IDs** with paired restoration intervals. Validation evaluates every ID separately; test evaluates those three IDs, their joint combination, and all-ID restoration. Selection always uses validation AUROC recovery. The Basic summary uses the previously specified focal removal for each task; detailed CSVs contain every single/family removal. CSV filenames now include `concept_id` and restoration rows identify the member fields and channel count. Concept-prediction accuracy remains per source target, keeping its original units rather than averaging unrelated measurements. `by_concept_id/concept_definitions.json` provides the training target definitions; `concept_id_groups.json` defines the ID-level operations.
 
 Restoration substitutes **unperturbed predicted concepts from the same participant and CBM**, just as before. It is a diagnostic analysis, not measured-concept correction or an autonomous reconstruction method. All-item restoration reproduces the unperturbed classifier by construction. Report negative recovery as well as positive recovery. The unadjusted bootstrap intervals do not resolve multiple testing across hundreds of candidate items.
 
-Rerun the same command to reuse completed labels, model checkpoints and finished task experiments. An interruption during fitting restarts that task's unsaved CBM fit; a saved `model.pt` is reused for evaluation. No new code SHA checks are added. Use a new `--output-root` for changed definitions or settings.
+**If the previous field-level version already ran, pull and rerun the same command with the same output directory.** Its completed labels and `model.pt` files are reused, with no CBM retraining. The old field-level `DONE.json` does not skip this new analysis. ID-level outputs live in `by_concept_id/` and the newly named tables, preserving the old field-level results. Once ID-level analysis finishes, subsequent runs reuse its own completion marker.
+
+An interruption during fitting restarts that task's unsaved CBM fit; a saved `model.pt` is reused for evaluation. No new code SHA checks are added. Use a new `--output-root` for changed training definitions or settings. The ID-only analysis change itself does not require a new output root.
 
 To regenerate summaries without training:
 

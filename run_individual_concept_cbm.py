@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task-specific individual concepts: reuse backbones; run both CBM experiments."""
+"""Task-specific CBMs with Concept-ID restoration; reuse fitted backbones/readouts."""
 import argparse
 import os
 from pathlib import Path
@@ -28,6 +28,7 @@ def main():
     else:
         cfg = yaml.safe_load((source / 'runtime.yaml').read_text())
         cfg.update(output_root=str(source), individual_root=str(output), devices=args.devices,
+                   analysis_unit='concept_id',
                    individual_modes=['basic', 'mixed'] if args.mode == 'both' else [args.mode],
                    clinical_dir=str(args.clinical_dir.expanduser().resolve()))
         if args.tasks: cfg['tasks'] = args.tasks

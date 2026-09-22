@@ -10,19 +10,23 @@ import torch
 from common import Bootstrap
 from individual_concept_labels import blocked, recorded_value
 from individual_concept_model import prepare, restore, predict, date_days
-from individual_concept_experiment import metric_batch, restoration_batch, run_task, make_report
+from individual_concept_experiment import (metric_batch, restoration_batch, run_task, make_report,
+                                           concept_id_groups, analysis_dir)
 
 
 def fixture():
     rng = np.random.default_rng(42)
     definitions = [
-        ('numeric', ['text']), ('category', ['radio']), ('constant', ['text']),
-        ('unobserved', ['text']), ('date', ['text']), ('phase_named_date', ['radio'])]
-    schema = {'inventory_ids': 6, 'source_pairs': 6, 'concepts': [dict(name=n, concept_id=str(i),
+        ('numeric', ['text'], '3004249'), ('numeric_repeat', ['text'], '3004249'),
+        ('category', ['radio'], '2005200014'), ('constant', ['text'], '70001'),
+        ('unobserved', ['text'], '70002'), ('date', ['text'], '4160030'),
+        ('phase_named_date', ['radio'], '2005200014')]
+    schema = {'inventory_ids': 5, 'source_pairs': 7, 'concepts': [dict(name=n, concept_id=cid,
         concept_name=n, source_field=n, field_types=t, unit='', domain='Observation')
-        for i, (n, t) in enumerate(definitions)]}
+        for n, t, cid in definitions]}
     labels = pd.DataFrame({'person_id': list(map(str, range(36))),
         'numeric': [str(i / 5) for i in range(36)], 'category': ['0', '1', '777'] * 12,
+        'numeric_repeat': [str((i + 10) / 3) for i in range(36)],
         'constant': ['fixed metadata'] * 36, 'unobserved': [''] * 24 + ['new in test'] * 12,
         'date': [f'2023-01-{i % 20 + 1:02d}' for i in range(36)], 'phase_named_date': ['1', '2'] * 18})
     caches = {}
@@ -80,8 +84,8 @@ class IndividualConceptTests(unittest.TestCase):
                 cfg['individual_mode'] = mode
                 with patch('individual_concept_experiment.feature_caches', return_value=(paths, masks)):
                     run_task(task, cfg, torch.device('cpu'))
-                folder = output/mode/task
-                artifact = torch.load(folder/'model.pt', weights_only=False)
+                fit_folder = output/mode/task; folder = analysis_dir(output, mode, task)
+                artifact = torch.load(fit_folder/'model.pt', weights_only=False)
                 model = restore(artifact, 'cpu')
                 full, p = predict(model, caches['val']['embedding'])
                 missing, _ = predict(model, caches['val']['embedding']*.4)
@@ -91,16 +95,36 @@ class IndividualConceptTests(unittest.TestCase):
                 cols = list(range(c['start'],c['stop'])); direct = missing.clone(); direct[:, cols] = full[:, cols]
                 expected = model.task_head(direct).squeeze(-1).sigmoid().detach().numpy()
                 np.testing.assert_allclose(restoration_batch(model, missing, full, [cols])[0], expected, atol=1e-7)
+                groups = concept_id_groups(model.spec['items'])
+                self.assertEqual(groups['3004249']['members'], ['numeric','numeric_repeat'])
+                self.assertEqual(len(groups['2005200014']['columns']), 5)
+                self.assertEqual(sorted(i for g in groups.values() for i in g['columns']), list(range(model.spec['width'])))
+                for cid in ('3004249','2005200014'):
+                    cols = groups[cid]['columns']; direct = missing.clone(); direct[:,cols] = full[:,cols]
+                    expected = model.task_head(direct).squeeze(-1).sigmoid().detach().numpy()
+                    np.testing.assert_allclose(restoration_batch(model, missing, full, [cols])[0], expected, atol=1e-7)
                 for c in model.spec['items']:
                     if not c['learnable']: torch.testing.assert_close(full[:,c['start']:c['stop']], missing[:,c['start']:c['stop']])
                 results = pd.read_csv(folder/'restoration.csv')
                 self.assertEqual(set(results.split), {'val','test'})
+                self.assertEqual(set(results[results.split=='val'].concept), set(groups)|{'ALL_ITEMS','TOP3_JOINT'})
                 selected = json.loads((folder/'VAL_TOP3.json').read_text())
                 for source_name, concepts in selected.items():
                     got = set(results[(results.split=='test')&(results.removed_input==source_name)].concept)
                     self.assertEqual(got, set(concepts)|{'ALL_ITEMS','TOP3_JOINT'})
+                    self.assertEqual(len(concepts), len(set(concepts)))
+                # A completed field-level v1 run must not skip ID-level analysis
+                # or force a refit. Its model stays at the original location.
+                (fit_folder/'DONE.json').write_text('{"legacy_field_run": true}')
+                (folder/'DONE.json').unlink()
+                with patch('individual_concept_experiment.feature_caches', return_value=(paths, masks)), \
+                     patch('individual_concept_experiment.fit', side_effect=AssertionError('must reuse weights')):
+                    run_task(task, cfg, torch.device('cpu'))
+                self.assertTrue((folder/'DONE.json').exists())
             make_report(cfg)
-            self.assertEqual(len(list((output/'tables').glob('SUMMARY_*.md'))), 4)
+            summaries = list((output/'tables').glob('SUMMARY_CONCEPT_ID_*.md'))
+            self.assertEqual(len(summaries), 4)
+            self.assertTrue(all('Source fields restored together' in p.read_text() for p in summaries))
 
 
 if __name__ == '__main__': unittest.main()
