@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+from stats import balanced_indices, f1, threshold
 
 
 def numeric(value):
@@ -152,49 +153,62 @@ def state(model): return {k: v.detach().cpu().clone() for k, v in model.state_di
 
 
 def fit(train, val, labels, schema, cfg, device, masked_train=None):
+    """Frozen backbone; concept warm-up, head fitting, then joint readout tuning.
+
+    Mixed mode oversamples participants once per epoch, then presents both
+    views of each sampled participant with equal weight. Encoding statistics
+    and vocabulary are fitted to unique original training participants only.
+    """
     torch.manual_seed(cfg['seed'])
     spec, data = prepare(train, val, labels, schema)
-    if masked_train is not None:
-        masked = torch.tensor((np.asarray(masked_train) - np.asarray(spec['x_mean'])) / np.asarray(spec['x_std']), dtype=torch.float32)
-        data[0] = {k: torch.cat((v, masked if k == 'x' else v)) for k, v in data[0].items()}
     data = [{k: v.to(device) for k, v in d.items()} for d in data]
-    model = IndividualCBM(spec).to(device); history = []; artifacts = {}; reference = None
+    masked = None
+    if masked_train is not None:
+        masked = torch.as_tensor((np.asarray(masked_train)-np.asarray(spec['x_mean']))/np.asarray(spec['x_std']),
+                                 dtype=torch.float32, device=device)
+    model = IndividualCBM(spec).to(device); history = []; selections = {}; reference = None
     phases = (('concept', cfg['concept_epochs']), ('head', cfg['head_epochs']), ('joint', cfg['joint_epochs']))
-    selections = {}
-    for phase, epochs in phases:
+    for phase_index, (phase, epochs) in enumerate(phases):
         model.concept_layer.requires_grad_(phase != 'head'); model.task_head.requires_grad_(phase != 'concept')
-        optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=.001, weight_decay=.0001)
-        best, best_score, best_epoch, stale = state(model), float('inf'), 0, 0
-        for epoch in range(epochs + 1):
+        optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
+                                     lr=cfg['cbm_learning_rate'], weight_decay=cfg['cbm_weight_decay'])
+        best, best_key, best_epoch, stale = state(model), (-float('inf'), -float('inf')), 0, 0
+        for epoch in range(epochs+1):
             if epoch:
+                indices = balanced_indices(train['y'], cfg['seed'] + phase_index*100000 + epoch)
+                idx = torch.as_tensor(indices, device=device)
+                batch = {k: v[idx] for k, v in data[0].items()}
+                if masked is not None:
+                    batch = {k: torch.cat((v, masked[idx] if k == 'x' else v)) for k, v in batch.items()}
                 optimizer.zero_grad(set_to_none=True)
-                c, y = model.losses(data[0])
-                objective = c.nanmean() if phase == 'concept' else y if phase == 'head' else y + c.nanmean()
+                c, loss_y = model.losses(batch)
+                objective = c.nanmean() if phase == 'concept' else loss_y if phase == 'head' else loss_y + cfg['concept_lambda']*c.nanmean()
                 objective.backward(); nn.utils.clip_grad_norm_(model.parameters(), 5.); optimizer.step()
-            with torch.no_grad(): c, y = model.losses(data[1])
-            per = c.cpu().numpy(); mean_loss = float(c.nanmean())
+            with torch.no_grad():
+                c, loss_y = model.losses(data[1])
+                p = model(data[1]['x'])[2].sigmoid().cpu().numpy()
+            per = c.cpu().numpy(); concept_loss = float(c.nanmean())
             known = np.isfinite(per)
-            eligible = phase != 'joint' or bool(np.all(per[known] <= reference[known] * 1.1 + 1e-8))
-            score = mean_loss if phase == 'concept' else float(y)
-            if not np.isfinite(score): raise ValueError('No finite validation objective; inspect concept label coverage')
-            history.append({'phase': phase, 'epoch': epoch, 'val_task_loss': float(y),
-                            'val_concept_loss': mean_loss, 'eligible': eligible})
-            if eligible and score < best_score - 1e-7:
-                best, best_score, best_epoch, stale = state(model), score, epoch, 0
+            eligible = phase != 'joint' or bool(np.all(per[known] <= reference[known]*(1+cfg['concept_tolerance'])+1e-8))
+            cut = threshold(val['y'], p); score = float(f1(val['y'], p, cut))
+            key = (-concept_loss, -float(loss_y)) if phase == 'concept' else (score, -float(loss_y))
+            history.append(dict(phase=phase, epoch=epoch, val_f1=score, threshold=cut,
+                                val_task_loss=float(loss_y), val_concept_loss=concept_loss, eligible=eligible))
+            if eligible and key > best_key:
+                best, best_key, best_epoch, stale = state(model), key, epoch, 0
             else: stale += 1
             if epoch % 25 == 0 or stale >= cfg['concept_patience']:
-                print(f'[CBM] {phase} epoch={epoch} val_task={float(y):.4f} val_concept={mean_loss:.4f} gate={eligible}', flush=True)
+                print(f'[CBM {phase}] epoch={epoch} val_F1={score:.4f} concept_loss={concept_loss:.4f} eligible={eligible}', flush=True)
             if stale >= cfg['concept_patience']: break
         model.load_state_dict(best)
-        selections[phase] = {'epoch': best_epoch, 'score': best_score,
-                             'status': 'sequential_fallback' if phase == 'joint' and best_epoch == 0 else 'fitted'}
+        selections[phase] = dict(epoch=best_epoch, status='sequential_fallback' if phase=='joint' and best_epoch==0 else 'fitted')
         if phase == 'head':
-            artifacts['sequential'] = state(model)
             with torch.no_grad(): reference = model.losses(data[1])[0].cpu().numpy()
-    artifacts['joint'] = state(model)
-    return {'spec': spec, 'states': artifacts, 'selection': selections, 'backbone_frozen': True,
-            'training_views': ['full', 'masked'] if masked_train is not None else ['basic'],
-            'lambda': 1., 'concept_loss_tolerance': .1}, history
+    _, p = predict(model, val['embedding'])
+    return dict(spec=spec, states={'joint':state(model)}, selection=selections,
+                threshold=threshold(val['y'], p), backbone_frozen=True,
+                training_views=['full','masked'] if masked_train is not None else ['basic'],
+                concept_lambda=cfg['concept_lambda'], concept_tolerance=cfg['concept_tolerance']), history
 
 
 def restore(artifact, device, arm='joint'):

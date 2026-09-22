@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit preparation or existing-input training; no preprocessing by default."""
+"""Existing preprocessing recipe, separate from the F1 experiment runner."""
 import argparse
 import os
 from pathlib import Path
@@ -80,51 +80,28 @@ def execute(cmd, dry=False):
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('stage', choices=('raw','labels','train','report','all'),
-                   help='raw: preprocess; labels: bind history/concepts; train/report: existing inputs; all: raw through tables')
+    p=argparse.ArgumentParser(description='Optional existing raw preparation recipe; not used by run.py.')
+    p.add_argument('stage', choices=('raw','labels'))
     p.add_argument('--pipeline-config', type=Path, default=HERE/'pipeline.yaml')
-    p.add_argument('--study-config', type=Path, default=HERE/'study.yaml')
-    p.add_argument('--devices', nargs='+', default=None)
-    p.add_argument('--output-root', type=Path, help='Override only the model/report output directory')
+    p.add_argument('--study-config', type=Path, default=HERE/'preprocessing_study.yaml')
     p.add_argument('--dry-run', action='store_true')
-    a = p.parse_args(); cfg = load_paths(a.pipeline_config)
-    study_path = a.study_config.resolve()
-    if a.stage in ('raw','all'):
-        missing = [k for k,v in cfg['manifests'].items() if not v]
-        if missing and not a.dry_run:
-            p.error('Set the actual manifest paths in pipeline.yaml: '+', '.join(missing))
-        # Regeneration gets its own directory; do not overwrite previous processed data.
+    a=p.parse_args();cfg=load_paths(a.pipeline_config)
+    if a.stage=='raw':
+        missing=[k for k,v in cfg['manifests'].items() if not v]
+        if missing and not a.dry_run:p.error('Set manifest paths in pipeline.yaml: '+', '.join(missing))
         if not a.dry_run:
-            root = Path(cfg['prepared_root']); root.mkdir(parents=True, exist_ok=False)
-            (root/'scalers').mkdir()
-            (root/'model_full_assets_v1/inputs').mkdir(parents=True)
-        for cmd in raw_commands(cfg): execute(cmd, a.dry_run)
-        study_path = Path(cfg['prepared_root'])/'study.inputs.yaml'
+            root=Path(cfg['prepared_root']);root.mkdir(parents=True,exist_ok=False)
+            (root/'scalers').mkdir();(root/'model_full_assets_v1/inputs').mkdir(parents=True)
+        for cmd in raw_commands(cfg):execute(cmd,a.dry_run)
         if not a.dry_run:
-            study = yaml.safe_load(a.study_config.read_text()); study['artifact_root'] = cfg['prepared_root']
-            study['output_root'] = cfg['new_output_root']
-            study_path.write_text(yaml.safe_dump(study, sort_keys=False))
-    if a.stage in ('labels','all'):
-        target = Path(cfg['prepared_root'])/'study.prepared.yaml'
-        print(f'Prepare history labels/masters and original12 train/val labels -> {target}', flush=True)
+            study=yaml.safe_load(a.study_config.read_text());study['artifact_root']=cfg['prepared_root']
+            study['output_root']=cfg['new_output_root']
+            (root/'study.inputs.yaml').write_text(yaml.safe_dump(study,sort_keys=False))
+    else:
+        target=Path(cfg['prepared_root'])/'study.prepared.yaml'
+        print('Historical history/original12 label preparation -> '+str(target),flush=True)
         if not a.dry_run:
             from prepare_study_inputs import prepare
-            prepare(cfg, study_path, target)
-        study_path = target
-    if a.stage in ('train','report','all'):
-        cmd = [sys.executable, '-u', str(HERE/'run.py'), '--config', str(study_path),
-               '--stage', 'report' if a.stage=='report' else 'all']
-        if a.devices: cmd += ['--devices', *a.devices]
-        if a.output_root: cmd += ['--output-root', str(a.output_root)]
-        execute(cmd, a.dry_run)
-        if a.dry_run:
-            print('Append concept definitions and F1 details to the resulting tables/SUMMARY_*.md')
-        else:
-            out = (a.output_root or Path(yaml.safe_load(study_path.read_text())['output_root'])).expanduser().resolve()
-            execute([sys.executable, str(HERE/'report_update/enrich_summaries.py'),
-                     '--results-root', str(out), '--out-dir', str(out/'tables')])
+            prepare(cfg,a.study_config.resolve(),target)
 
-
-if __name__ == '__main__':
-    main()
+if __name__=='__main__':main()

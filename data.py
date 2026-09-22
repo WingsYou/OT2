@@ -129,7 +129,7 @@ def clinical_inputs(task,cfg,entry):
     if task in FULL_CONFIGS:
         acquired=master.has_clinical.astype(str).str.lower().isin(('true','1')).to_numpy()
     else:
-        presence=read_json(Path(cfg['output_root'])/'full_clinical_presence.json')
+        presence=read_json(Path(cfg.get('source_root',cfg['output_root']))/'full_clinical_presence.json')
         acquired=np.asarray([presence[pid] for pid in ids])
     mask=torch.isfinite(raw)&torch.as_tensor(acquired).unsqueeze(1)
     values=scaler.normalise(raw,mask,'clinical')

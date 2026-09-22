@@ -61,44 +61,53 @@ def pool(jobs,devices,config,root,after=None):
         selector.close()
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--config',type=Path,default=HERE/'study.yaml')
-    p.add_argument('--devices',nargs='+');p.add_argument('--stage',choices=('all','cache','train','report'),default='all')
-    p.add_argument('--output-root',type=Path,help='New result directory; processed input paths stay unchanged')
+    p=argparse.ArgumentParser(description='F1-only six-task study from existing processed inputs/cache.')
+    p.add_argument('--config',type=Path,default=HERE/'study.yaml')
+    p.add_argument('--devices',nargs='+');p.add_argument('--source-root',type=Path)
+    p.add_argument('--output-root',type=Path)
+    p.add_argument('--stage',choices=('all','train','analyze','report'),default='all')
     a=p.parse_args();cfg=yaml.safe_load(a.config.read_text())
-    if a.devices:cfg['devices']=a.devices
-    if a.output_root:cfg['output_root']=str(a.output_root)
+    for key in ('source_root','output_root','devices'):
+        if getattr(a,key) is not None:cfg[key]=getattr(a,key)
+    for key in ('source_root','output_root','clinical_dir'):
+        cfg[key]=str(Path(cfg[key]).expanduser().resolve())
     cfg['devices']=list(map(str,cfg['devices']))
-    root=Path(cfg['output_root']).expanduser().resolve();cfg['output_root']=str(root)
+    root=Path(cfg['output_root']);source=Path(cfg['source_root'])
+    if root==source:raise ValueError('Use a new output directory for the F1 rerun; source_root is read-only.')
     root.mkdir(parents=True,exist_ok=True);(root/'logs').mkdir(exist_ok=True)
     for key in ('OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'):os.environ[key]=str(cfg['cpu_threads'])
-    from common import read_json,write_json,sha
+    from common import read_json,write_json
     from report import make_report
+    runtime=root/'runtime.yaml'
+    if runtime.exists():
+        previous=yaml.safe_load(runtime.read_text())
+        # Preserve a resumed experiment; allow only scheduling resources to change.
+        resources=('devices','num_workers','cpu_threads')
+        if {k:v for k,v in previous.items() if k not in resources}!={k:v for k,v in cfg.items() if k not in resources}:
+            raise ValueError('Settings differ from this output. Use its runtime.yaml or choose a new output-root.')
     if a.stage=='report':make_report(cfg);return
-    # One config/code snapshot and one lock; no inherited bundle/audit chain.
-    files=[*HERE.rglob('*.py'),*(HERE/'configs').glob('*.yaml')]
-    code={str(path.relative_to(HERE)):sha(path) for path in sorted(files)}
-    identity={'settings':cfg,'code_sha256':code};identity_path=root/'RUN_CONFIG.json'
-    if identity_path.exists() and read_json(identity_path)!=identity:
-        raise ValueError('Code/settings changed for this output. Use a new output_root for a changed experiment.')
     with (root/'.run.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError:raise RuntimeError('This output already has a running process') from None
-        write_json(identity_path,identity)
-        runtime=root/'runtime.yaml';runtime.write_text(yaml.safe_dump(cfg,sort_keys=False))
-        from data import prepare
-        prepare(cfg)
-        status={'status':'running','stage':a.stage,'tasks':cfg['tasks']};write_json(root/'STATUS.json',status)
+        except BlockingIOError:raise RuntimeError('A process is already using this output directory') from None
+        runtime.write_text(yaml.safe_dump(cfg,sort_keys=False))
+        status=dict(status='running',stage=a.stage,tasks=cfg['tasks']);write_json(root/'STATUS.json',status)
         try:
-            if a.stage in ('all','cache'):
-                n=len(cfg['devices'])
-                pool([(f'cache_{i}',['--cache-shard',str(i),'--cache-shards',str(n)]) for i in range(n)],
-                     cfg['devices'],runtime,root)
             if a.stage in ('all','train'):
+                # These are existing normalized tensors and frozen ResNet features,
+                # not fitted representations from the previous experiment.
+                read_json(source/'inputs.json');read_json(source/'cache/dimensions.json')
+                if not (root/'labels/DONE.json').exists():
+                    from cbm.labels import extract,FOUR_OBSERVATION_FORMS,SURVEY_ADMIN_IDS
+                    extract(cfg['clinical_dir'],root/'labels',observation_forms=FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS)
+                    write_json(root/'labels/DONE.json',dict(clinical_dir=cfg['clinical_dir']))
                 jobs=[(task+'_'+variant,['--task',task,'--variant',variant]) for task in cfg['tasks'] for variant in ('full','basic')]
+                pool(jobs,cfg['devices'],runtime,root)
+            if a.stage in ('all','analyze'):
+                jobs=[(task+'_analysis',['--task',task,'--analyze']) for task in cfg['tasks']]
                 pool(jobs,cfg['devices'],runtime,root,after=lambda:make_report(cfg))
             status['status']='complete';write_json(root/'STATUS.json',status);make_report(cfg)
         except BaseException as exc:
             status.update(status='failed',error=str(exc));write_json(root/'STATUS.json',status);raise
-    print('STUDY_COMPLETE: '+str(root/'tables'),flush=True)
+    print('F1_STUDY_COMPLETE: '+str(root/'tables'),flush=True)
 
 if __name__=='__main__':main()

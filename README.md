@@ -1,170 +1,106 @@
-# OT2: multimodal prediction and clinical concept analysis
+# OT2 — six-task F1 study
 
-OT2 studies two linked questions using AI-READI data: which modalities a fitted classifier relies on, and which clinical concept channels carry changes in its predictions when an input is removed.
+One entry point runs the six requested experiment types using **existing processed inputs**. It fits new Full and Basic multimodal models, fits two concept bottlenecks, and writes validation/test tables. The raw preprocessing definitions are unchanged.
 
-This repository contains the consolidated **six-task pipeline**: preprocessing, labels, train-only scaling, Full/Basic Clinical model training, original12 Concept Bottleneck Models (CBMs), modality ablation, concept-channel restoration, and validation/test reports. It replaces the earlier scripts on `main`; historical implementations and summaries remain available in Git history.
+## Run on the cluster
 
-## Model overview
+Use the existing `ot2` conda environment and the four GPUs allocated to the job:
 
-```mermaid
-flowchart TD
-    C["Full Clinical or Basic23 information"] --> CE["Mask-aware clinical MLP"]
-    E["12-lead ECG waveform + report values"] --> EE["Waveform Transformer + numeric encoder"]
-    T["Environment, activity and glucose sequences"] --> TE["Separate temporal encoders"]
-    R["FLIO, OCT, OCTA and photography"] --> RE["Shared frozen ResNet18 + learned pooling"]
-    CE --> F["Nine modality vectors → fusion Transformer"]
-    EE --> F
-    TE --> F
-    RE --> F
-    F --> H["Task classifier"]
-    F --> Z["Freeze the trained Basic model's fusion representation"]
-    Z --> CB["Predict 12 labeled clinical concepts"]
-    CB --> CH["CBM task classifier"]
+```bash
+cd ~/OT2
+git pull origin main
+conda activate ot2
+python -u run.py --devices 0 1 2 3
 ```
 
-Each modality produces a 256-dimensional vector. The fusion Transformer combines the nine modality slots with a patient summary token. Each task has independently fitted Full Clinical and Basic Clinical models. **Basic23** means 23 encoded columns covering age-related information, education, marital status and language; the other eight modalities remain available.
+Defaults in [study.yaml](study.yaml):
 
-The CBM is a separate readout of the trained Basic model's frozen fusion representation. Its concept predictor and classification head are jointly trained after sequential warmup (`lambda=1`, with a concept-alignment selection constraint). There is no latent or Basic Clinical bypass around the concept layer. The multimodal encoders/fusion are not jointly updated during this CBM stage.
+- Read-only input/cache root: `/data/pzhao3/ot2_output/six_task_study_v1_20260913`.
+- New results: `/data/pzhao3/ot2_output/ot2_f1_study_v1_20260922`.
+- Raw clinical CSV directory: the existing AI-READI `dataset/clinical_data` directory.
+- **Seed 42, positive-class F1, 10,000 bootstrap resamples.**
 
-The optional [Full Clinical CBM experiment](#full-clinical-cbm-and-clinical-information-removal) applies the same original12 readout to the frozen Full Clinical model and evaluates concept-channel restoration after removing nonbasic clinical information.
+The source root must contain `inputs.json`, `full_clinical_presence.json`, `cache/dimensions.json`, and `cache/people/*.pt` from the earlier six-task run. `inputs.json` points to the existing task masters, clinical tables and fitted scalers. These files and cache tensors are reused without rebuilding them. Old fitted models, fusion embeddings and CBMs are **not** reused.
 
-## Where to find each component
+To change the two result locations:
 
-| Component | Implementation |
+```bash
+python -u run.py --devices 0 1 2 3 \
+  --source-root /data/pzhao3/ot2_output/six_task_study_v1_20260913 \
+  --output-root /data/pzhao3/ot2_output/ot2_f1_study_v1_20260922
+```
+
+Rerun the same command after interruption. Completed stages are skipped; interrupted multimodal fitting resumes from its last saved epoch. An interrupted small CBM fit restarts that CBM only. Use a new output directory when changing the experimental settings. A small `runtime.yaml` records settings; there are no code bundles, SHA manifests, or chained audit requirements.
+
+Optional stages: `--stage train`, `--stage analyze`, `--stage report`. `all` is the default. `analyze` uses the new fitted models/features; `report` rebuilds tables from saved analysis CSVs. GPU numbers are relative to `CUDA_VISIBLE_DEVICES` when set by the scheduler. Each worker receives one GPU; up to four independent task/model jobs run concurrently. No model-parallel setup is needed.
+
+## Experiments retained
+
+| Experiment | What is fitted / compared | Validation selection |
+|---|---|---|
+| Downstream classification | Full Clinical; the same Full model with only Basic Clinical available; separately retrained Basic Clinical | Each fitted classifier's best checkpoint and F1 threshold |
+| Modality ablation | Remove each of nine sources, all four retinal sources, or both wearable sources from the Basic model | Top **3 of 11** removals by F1 drop |
+| Basic CBM | Frozen new Basic model → predicted concepts → new classifier | Concept warm-up, head fitting, joint readout tuning |
+| Mixed CBM | Frozen new Full model → one shared CBM trained on paired full and basic-only clinical inputs | Model/threshold selection on basic-only validation inputs; evaluate both views |
+| Basic concept restoration | For each selected removal, restore each Concept ID's channels from that participant's unperturbed Basic-CBM predictions | Top **10 IDs per removal**, ranked by F1 recovery |
+| Mixed concept restoration | Only basic clinical inputs available; restore each ID from that participant's full-input Mixed-CBM predictions | Top **10 IDs**, ranked by F1 recovery |
+
+All conditions retain the other eight modalities unless the experiment explicitly removes them. “Basic Clinical” means the previously agreed **23 encoded basic features**. Full models keep the existing task-specific clinical views, including the historical MoCA-derived full view for the three history tasks; each history endpoint's own target fields are excluded as before.
+
+Single-source and family removals can overlap in the top three. Their effects are not additive. Rankings include the largest numerical effects even when fewer than three/ten effects are positive. Test evaluation uses exactly the validation-selected lists and ranks. The retired all-eight-nonclinical removal, original12/expanded13 comparisons, concept-family grouping, field-level ranking, measured-value substitution, and joint-top-k restoration are not run.
+
+## Training and concept definitions
+
+Training oversamples the minority outcome class with replacement to equal the majority count **within the training split only**, retaining every original training participant each epoch. BCE has no additional positive-class weight. Validation/test are never oversampled; their original prevalence and unique participants are preserved. Balancing is a training choice, not a prerequisite for calculating F1.
+
+The multimodal encoders/fusion are unchanged. Frozen ImageNet ResNet-18 outputs are read from the existing cache; temporal encoders, image pooling, fusion and classifier are freshly fitted. Each new model exports unique-participant features for train/val/test. Ablation reruns only fusion/classification on cached source tokens. The stored classifier checkpoint omits the unused CNN; image features continue to come from the source cache.
+
+The approved **task-specific, four-survey concept inventory** is used, not the original12 bank. Observation is restricted to food insecurity, neighborhood environment, racial/ethnic discrimination, and the combined SDOH survey. Other retained domains are unchanged. The four excluded IDs `4160030`, `2005200102`, `2005200558`, `2005200559` and all their source fields remain excluded. Task-specific outcome exclusions also remain in force. The resulting inventory contains 222 IDs for MoCA, 217 for CVD broad, 220 for CVD strict, and 224 for each history task; the number with learnable targets depends on training coverage/variation.
+
+`cbm/labels.py` reads only the existing local clinical CSVs to obtain supervision. It does not rebuild the multimodal inputs or downstream outcomes, and never downloads patient data. Actual values and their observation masks are retained; an absent occurrence is not fabricated into a negative disease label. Units/qualifiers and distinct repeated measurements retain separate supervised channels. Constant or unobserved targets cannot be ranked as learnable concepts. At restoration, **all channels sharing a Concept ID are changed together**; e.g., both systolic blood-pressure measurements are one intervention.
+
+Both CBMs retain the existing small concept predictor and 32-unit classification head, with no direct embedding bypass. Training comprises concept-only warm-up, head fitting, then joint concept/head tuning with `BCE + λ × masked concept loss` (λ = 1). Numeric targets use MSE; categorical targets use cross-entropy. Mixed training equally weights the full and masked view of each sampled participant. Backbone weights stay frozen. The joint checkpoint must retain each evaluable concept's validation loss within 10% of its sequential reference; otherwise the sequential model is retained and reported in `DONE.json`. No extra joint-loss sweep is performed.
+
+Concept encodings and feature normalization are fitted on unique training participants before oversampling. Concept warm-up selects validation concept loss; head/joint phases select validation F1, with BCE as a tie-breaker. Continuous concept loss is still necessary for supervision even though downstream reporting is F1-only.
+
+## F1 and statistics
+
+- Threshold = highest threshold attaining maximum positive-class validation F1. Checkpoint ties use lower validation BCE.
+- Full-model basic-only inference uses the Full model's original threshold. Basic ablations/restorations keep their unperturbed classifier/CBM thresholds. Both Mixed views/restorations use the threshold selected on masked validation inputs.
+- F1 **drop** = baseline − removed; F1 **recovery** = restored − removed. Report point estimates and percentile 95% confidence intervals from 10,000 **paired participant**, outcome-stratified bootstrap draws.
+- Two-sided p values use 10,000 within-participant prediction-swap permutations. This tests paired prediction exchangeability conditional on the fitted models/thresholds, rather than treating bootstrap draws as independent training runs. Identical decisions give p = 1. Minimum Monte Carlo p is 1/10,001.
+- Benjamini–Hochberg q values are calculated separately for downstream comparisons, CBM comparisons, modality ablations, Basic restoration and Mixed restoration, across the six tasks within each split. Validation includes every screened learnable concept; test includes only the preselected IDs. Final q values require all six tasks to finish.
+- All main comparisons use the same full cohort for each task/split. Available-source counts are included in the ablation CSV; no additional availability subgroup experiment is introduced.
+
+The supplied reference paper motivates reporting performance, paired changes, CIs and corrected significance. Its five-generation Wilcoxon/Mann–Whitney design is not copied into a single-seed patient-level F1 experiment. Bootstrap CIs here condition on the trained model, chosen threshold and observed class counts; they do not include training-seed or threshold-selection uncertainty. Validation results remain exploratory. The previously inspected test split is not a newly untouched confirmatory cohort.
+
+High positive prevalence can make an all-positive classifier's F1 high. Each report includes class counts and that F1 reference, so an apparently high F1 is not automatically interpreted as good discrimination. Oversampling does not guarantee better F1 or larger ablation effects.
+
+Concept restoration is a **diagnostic intervention using a full-input reference**. It does not demonstrate autonomous reconstruction of missing clinical information at deployment, and is not substitution with measured ground-truth concepts.
+
+Statistical references: [paired permutation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.permutation_test.html), [training-only resampling](https://imbalanced-learn.org/dev/common_pitfalls.html).
+
+## Outputs and code map
+
+```
+output_root/
+  runtime.yaml, STATUS.json, logs/
+  labels/<task>/                  # local concept labels, coverage and schema
+  <task>/full/, basic/            # fresh checkpoints, logs and feature caches
+  <task>/basic_cbm/, mixed_cbm/   # CBM weights, concept definitions, fitting status
+  <task>/analysis/                # fixed SELECTION.json; paired predictions, CSVs
+  tables/SUMMARY_val.md
+  tables/SUMMARY_test.md
+  tables/*.csv                   # performance, differences, p and q
+```
+
+| Code | Responsibility |
 |---|---|
-| Clinical encoder | [`MaskAwareVectorEncoder`](vendor/task2_v2_model.py#L298) |
-| Environment, activity and glucose encoders | [`MaskedTemporalPatchEncoder`](vendor/task2_v2_model.py#L338) |
-| ECG waveform and numeric encoder | [`MaskedWaveformPatchEncoder`](vendor/task2_v2_model.py#L471), [`ECGEncoder`](vendor/task2_v2_model.py#L555) |
-| Four retinal modality representations | [`HierarchicalRetinalEncoder`](vendor/task2_v2_model.py#L951); frozen CNN caching in [`data.py`](data.py), learned pooling in [`train.py`](train.py) |
-| Multimodal fusion and model assembly | [`PresenceAwareFusion`](vendor/task2_v2_model.py#L1099), [`Task2V2Model`](vendor/task2_v2_model.py#L1172) |
-| Full/Basic fitting and modality ablation | [`train.py`](train.py), [`common.py`](common.py) |
-| Concept prediction, joint CBM and restoration | [`concepts.py`](concepts.py), [`vendor/cbm_joint_v2.py`](vendor/cbm_joint_v2.py) |
-| Concept IDs, measurements and groups | [Concept reference](report_update/CONCEPT_REFERENCE.md), [original12 specification](data_preprocessing_cluster/configs/cbm_concepts_v1.json) |
-| Raw preprocessing and label preparation | [`data_preprocessing_cluster/`](data_preprocessing_cluster/), [`prepare_study_inputs.py`](prepare_study_inputs.py) |
-| GPU scheduling and reports | [`run.py`](run.py), [`worker.py`](worker.py), [`report.py`](report.py) |
+| `run.py`, `worker.py`, `study.yaml` | One entry point, four-GPU scheduling and fixed settings |
+| `data.py`, `common.py` | Existing input/cache readers, Basic23 selection and source definitions |
+| `train.py`, `vendor/task2_v2_model.py` | Multimodal fitting, source-token ablation and feature export |
+| `cbm/labels.py`, `cbm/model.py`, `cbm/experiment.py` | Approved labels, typed bottleneck, two CBM training modes |
+| `analysis.py`, `stats.py`, `report.py` | Validation rankings, restoration, paired F1 statistics and English reports |
+| `data_preprocessing_cluster/` | Preserved preprocessing source; not invoked by the new runner |
 
-## Tasks and outputs
-
-The six binary tasks are **MoCA < 26, CVD broad, CVD strict, osteoporosis history, kidney-problem history, and lung-problem history**. Their definitions are in the [original task config](data_preprocessing_cluster/configs/downstream_tasks.json) and [history task config](data_preprocessing_cluster/configs/history_tasks_v1.json). The latter retains seven audited candidate outcomes; only the three history outcomes above are trained here.
-
-Four tables are generated separately for validation and test, reporting **AUROC, balanced accuracy and positive-class F1**, with paired bootstrap intervals for effects:
-
-| Table | Comparison |
-|---|---|
-| 1 | Full Clinical model; that model with only Basic Clinical retained at inference; retrained Basic Clinical model |
-| 2 | Basic model ablation: each of nine modalities, all retinal, all wearable, and all eight nonclinical inputs |
-| 3 | Basic multimodal classifier versus its original12 CBM readout |
-| 4 | Predicted concept-group restoration after source removal; top three groups selected on validation and held fixed on test |
-
-Table 4 restores a participant's concept channels predicted with complete inputs. It identifies model pathways; it does **not** implement a deployable missing-modality reconstruction algorithm or establish causal clinical effects. Thresholds and checkpoints are selected on validation. Earlier test results have already been examined in this project, so the test set should not be described as a previously untouched confirmatory cohort.
-
-## Run on the Cluster
-
-For the new **task-specific concept bank**, running both Basic Clinical and full+masked CBMs on the existing trained models, see [INDIVIDUAL_CONCEPT_CBM.md](INDIVIDUAL_CONCEPT_CBM.md). Training retains separate source targets; restoration and ranking operate on **Concept IDs**, simultaneously replacing every channel belonging to the same ID. Validation/test reports are generated separately.
-
-For the follow-up that retains **only four Observation surveys**, with separate concept subsets for all six tasks, see [FOUR_SURVEY_CONCEPT_CBM.md](FOUR_SURVEY_CONCEPT_CBM.md). Use `--concept-bank four-surveys-v2` to fit new Basic/Mixed CBMs in a separate result directory while reusing the trained multimodal backbones and caches.
-
-Reuse the existing `ot2` conda environment and processed inputs. Check input paths in [`study.yaml`](study.yaml) and [`configs/`](configs/). In a job allocated four H100 GPUs:
-
-```bash
-git clone https://github.com/WingsYou/OT2.git
-cd OT2
-conda activate ot2
-python -u pipeline.py train --devices 0 1 2 3 \
-  --output-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913
-```
-
-This command fits fresh models from existing processed data. It does not rerun raw preprocessing. Four GPUs run independent jobs, sharing cached frozen retinal features; ablation reuses source tokens and bootstrap calculations are batched on GPU. Use a new output directory when changing code or experimental settings.
-
-To regenerate reports for an already completed run without training:
-
-```bash
-python -u pipeline.py report \
-  --study-config /path/to/completed_run/runtime.yaml
-```
-
-Reports are written to `<output_root>/tables/SUMMARY_val.md` and `SUMMARY_test.md`, with CSV tables, concept definitions and F1 operating-point details. No patient data, participant predictions, checkpoints or pretrained weights are included in this repository.
-
-## Full Clinical CBM and clinical-information removal
-
-For an **already completed six-task run**, pull this repository and launch:
-
-```bash
-git pull --ff-only
-conda activate ot2
-python -u run_full_clinical_cbm.py \
-  --source-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913 \
-  --devices 0 1 2 3
-```
-
-Set `--source-root` to your actual completed result directory, the one containing `runtime.yaml`, `inputs.json`, `cache/`, and the six task folders. If you used the default in `study.yaml`, it is `/data/pzhao3/ot2_output/six_task_study_v1_20260913`. The launcher reads that run's settings and concept-label paths automatically. It does not rerun preprocessing or train the Full/Basic multimodal models.
-
-Each GPU processes one task at a time. Existing validation/test source tokens are reused; only clinical encoding and fusion are recomputed for the masked condition. Full-model training embeddings are exported once when absent. Concept training uses the existing GPU implementation, and confidence intervals use the same GPU-batched bootstrap. Completed tasks and saved CBM checkpoints are reused when the same command is rerun. The new launcher does not compute or compare code/file SHA hashes.
-
-The experiment keeps Basic23 and all eight nonclinical modalities, masks every other clinical value **and its observation indicator**, and evaluates the frozen Full Clinical CBM without refitting or threshold retuning. Seven concept groups are restored individually using the same participant's **full-input predicted concepts**. The six cardiometabolic concepts and all twelve concepts are also restored together. All-twelve restoration reproduces the full-input CBM prediction; this provides a complete-restoration reference. Validation selects the top three individual groups, and that ranking is fixed on test. The original12 definitions and concept-alignment selection constraint are unchanged.
-
-Outputs go to `<source-root>/full_clinical_cbm/`, separately from the earlier results:
-
-- `tables/SUMMARY_FULL_CBM_val.md` and `SUMMARY_FULL_CBM_test.md`: classification, removal degradation, group recovery, and concept definitions.
-- `tables/classification_*.csv`, `degradation_*.csv`, `restoration_*.csv`, and `top3_*.csv`: AUROC, balanced accuracy and positive-class F1, paired intervals, full/masked/restored metrics, and remaining gaps.
-- `<task>/`: CBM checkpoints, training logs, participant predictions, full/masked concept predictions and selected settings; `logs/`: per-task console logs.
-
-The comparison includes the existing Basic Clinical and Basic Clinical + CBM results when present. Sequential Full Clinical CBM results are retained in the detailed classification CSVs; the main report uses joint lambda=1 with the original sequential fallback. All comparisons use the entire labeled split and report how many participants actually had observed nonbasic clinical features.
-
-Optional arguments are `--tasks moca_binary cvd_broad_binary`, `--output-root /path/to/new/results`, `--bootstrap-samples 2000`, and `--report-only`. Use another output directory for a changed experiment; resume an interrupted run with the original command. No additional packages are required beyond the existing environment.
-
-Full Clinical inputs contain information used to define the concept labels. This extension evaluates how that information passes through a concept bottleneck and what happens when it is removed. It does not establish recovery from independent nonclinical inputs: restored channels use the unavailable full-input prediction as a diagnostic reference, as in the previous restoration experiment.
-
-## Train on full + masked inputs; deploy with masked inputs
-
-This minimal follow-up trains **one shared CBM** on both input conditions, with equal weight for each participant's full and masked views. It keeps the original Full Clinical encoders **and fusion frozen**, and updates only the original12 concept predictor and its classifier. Unlike the restoration experiment, evaluation predicts every concept from the masked input itself.
-
-```bash
-git pull --ff-only
-conda activate ot2
-python -u run_full_clinical_cbm.py \
-  --source-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913 \
-  --mixed-training --devices 0 1 2 3
-```
-
-Use the same `--source-root` as in your previous experiment. Existing Full Clinical CBM caches are reused from `<source-root>/full_clinical_cbm`; if those results are elsewhere, supply `--full-cbm-root /path/to/previous/full_cbm_results`. Only masked **training** embeddings need to be added when the previous caches are complete. Both input views retain Basic23 and the eight nonclinical modalities; the masked view additionally zeros all other clinical values and their observation indicators.
-
-The two training views share the same task label and observed concept targets. Their losses are averaged equally in concept warmup, classifier warmup and joint training (`lambda=1`). Missing concept targets remain masked. Embedding scaling is fitted to full training embeddings, and concept scaling to observed training labels, as before. Checkpoint selection, the existing 10% concept-alignment constraint, and Youden-threshold selection now use **masked validation**. Test evaluation uses only masked inputs and the fixed validation thresholds. There is no teacher prediction substitution, measured-concept injection, or full-input reference at inference.
-
-The run fits fresh CBM readouts on the existing backbone, schedules one task per GPU, and uses the same batched bootstrap. It writes separate results to `<source-root>/mixed_clinical_cbm/`:
-
-- `tables/SUMMARY_MIXED_CBM_val.md` and `SUMMARY_MIXED_CBM_test.md`: masked-only performance and paired improvements, plus concept prediction accuracy wherever measured labels are available.
-- `tables/classification_*.csv`, `gains_*.csv`, `concept_metrics_*.csv`: AUROC, balanced accuracy, F1, paired intervals, and per-concept errors.
-- `<task>/models.pt`, `training.csv`, `selection.json`, `predictions_*.csv`, `masked_concepts_*.npz`; and per-task logs under `logs/`.
-
-Comparators are the original Full Clinical classifier and, when available, the previous Full-only-trained CBM, both evaluated with masked inputs. Their thresholds are reselected using masked validation, so balanced accuracy/F1 can differ from the earlier report that kept full-input thresholds. The original comparator checkpoints are reused unchanged. The mixed sequential checkpoint is also retained in the detailed CSVs; the main table uses joint lambda=1 with sequential fallback.
-
-Rerun the same command to reuse completed tasks. Add `--report-only` to regenerate summaries, or `--tasks moca_binary cvd_broad_binary` to run a subset. Use a separate `--output-root` when changing experiment settings. This experiment tests mixed-input training of a frozen-representation CBM; it does not yet fine-tune fusion or compare against a non-CBM classifier trained with the same masking.
-
-## Concept restoration after mixed training
-
-After the mixed-training run completes, evaluate concept restoration with its saved checkpoint:
-
-```bash
-git pull --ff-only
-conda activate ot2
-python -u run_full_clinical_cbm.py \
-  --source-root /data/pzhao3/ot2_output/six_task_complete_v1_20260913 \
-  --mixed-restoration --devices 0 1 2 3
-```
-
-Use your previous six-task `--source-root`. This mode reads `<source-root>/mixed_clinical_cbm/runtime.yaml`, reuses its saved settings and masked-feature cache paths, and **does not train any model or rerun preprocessing/encoders/fusion**. If your mixed-training output is elsewhere, supply `--mixed-cbm-root /path/to/completed/mixed_results`. `--mixed-restoration` replaces `--mixed-training`; they are separate modes.
-
-For each task, the selected mixed-training CBM predicts concepts from the cached full and masked embeddings. Starting from the masked prediction, each of the seven concept groups is replaced separately with the same participant's **full-input prediction from that same mixed-training model**. The six cardiometabolic concepts and all twelve concepts are restored together in two additional conditions. The saved **masked-validation threshold** stays fixed across full, masked and restored predictions. Validation ranks the seven individual groups; test retains that ranking. All six tasks are evaluated on both splits using the whole labeled cohort. No measured concept labels are needed, including for test.
-
-Results are written separately to `<source-root>/mixed_clinical_cbm_restoration/`:
-
-- `tables/SUMMARY_MIXED_RESTORATION_val.md` and `SUMMARY_MIXED_RESTORATION_test.md`: same-model full/masked performance and initial gaps, followed by absolute restored AUROC/balanced accuracy/F1 and paired recovery intervals for every group.
-- `tables/classification_*.csv`, `degradation_*.csv`, `restoration_*.csv`, `top3_*.csv`: detailed effects, validation ranks and remaining gaps.
-- Per-task predictions, full/masked bottleneck values, selected settings and console logs.
-
-The selected sequential fallback is reused when joint training did not yield an accepted update. This diagnostic uses an unavailable full-input reference at deployment; it is not measured-concept correction or autonomous reconstruction. All-twelve restoration equals the full-input decision by construction. After successful masked training, a smaller remaining gap or negative recovery is possible and should be reported rather than treated as a failed run. Resume with the same command; use `--report-only` to regenerate reports.
-
-For preparation from raw data, fill in the actual manifest paths in [`pipeline.yaml`](pipeline.yaml) and follow [PREPARATION.md](PREPARATION.md). The [detailed Cluster guide](CLUSTER_GUIDE.md) describes the experiment definitions, defaults and recovery behavior. Dependencies are listed in [requirements.txt](requirements.txt) and [requirements-all.txt](requirements-all.txt); preserve the working CUDA PyTorch/torchvision installation.
-
-Local integration checks used synthetic data. The consolidated raw-to-report workflow has not been executed on the real Cluster dataset as a single run; existing processed outputs remain the default input for current experiments.
+Only code/configuration belong in Git. Raw data, patient-level predictions, labels and checkpoints remain on the cluster. Old experiment implementations remain available in Git history (before this F1 refactor). See [PREPARATION.md](PREPARATION.md) for the retained optional input-preparation recipe.
