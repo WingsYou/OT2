@@ -46,6 +46,9 @@ def restoration_batch(model, missing, full, columns):
     first, _, last = model.task_head; base = first(missing)
     values = []
     for cols in columns:
+        if len(cols) == model.spec['width']:
+            values.append(model.task_head(full).squeeze(-1).sigmoid())
+            continue
         delta = (full[:,cols]-missing[:,cols]) @ first.weight[:,cols].T
         values.append(last(torch.relu(base+delta)).squeeze(-1).sigmoid())
     return torch.stack(values).cpu().numpy()

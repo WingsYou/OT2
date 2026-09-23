@@ -143,10 +143,22 @@ class F1StudyTests(unittest.TestCase):
                 self.assertEqual(len(ids),10)
                 mode,source_name=key.split('__',1)
                 test=r[(r.split=='test')&(r['mode']==mode)&(r.removed_input==source_name)]
-                self.assertEqual(test.concept_id.tolist(),ids)
+                self.assertEqual(set(test.concept_id),{c['concept_id'] for c in schema['concepts']}|{'ALL_CONCEPTS'})
+                ranked=test[test.intervention=='individual'].sort_values('rank')
+                self.assertTrue(np.all(np.diff(ranked.value.to_numpy())<=1e-12))
+                joint=test[test.intervention=='all_concepts'].iloc[0]
+                self.assertAlmostEqual(joint.restored_f1,joint.full_f1)
+                self.assertAlmostEqual(joint.restored_ba,joint.full_ba)
             a=pd.read_csv(out/task/'analysis/ablation.csv')
             self.assertEqual(set(a.removed_input),set(REMOVALS));self.assertEqual(len(a),22)
             self.assertTrue((out/'tables/SUMMARY_test.md').exists())
+            exported=pd.read_csv(out/'tables/CONCEPT_RESTORATION_ALL_test.csv',dtype={'concept_id':str})
+            self.assertEqual(len(exported),4*12)
+            self.assertEqual(len(pd.read_csv(out/'tables/ALL_CONCEPTS_RESTORED_test.csv')),4)
+            # An older completed analysis must not suppress the expanded test sweep.
+            done=read_json(analysis/'DONE.json');done.pop('restoration_version');write_json(analysis/'DONE.json',done)
+            run_analysis(task,cfg,torch.device('cpu'))
+            self.assertEqual(read_json(analysis/'DONE.json')['restoration_version'],2)
             artifact=load(out/task/'mixed_cbm/model.pt');model=restore(artifact,'cpu')
             cache=load(out/task/'full/features_val.pt')
             full_z,full_p=predict(model,cache['embedding']);masked_z,_=predict(model,cache['masked_embedding'])

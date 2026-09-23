@@ -1,4 +1,4 @@
-"""Six requested experiments; validation selections precede test evaluation."""
+"""Frozen-model analyses with exploratory within-split Concept-ID rankings."""
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -13,7 +13,7 @@ from cbm.experiment import concept_id_groups, restoration_batch
 def run_analysis(task, cfg, device):
     root = Path(cfg['output_root'])/task
     out = root/'analysis'; out.mkdir(exist_ok=True)
-    if (out/'DONE.json').exists():
+    if (out/'DONE.json').exists() and read_json(out/'DONE.json').get('restoration_version') == 2:
         add_balanced_accuracy(task, cfg, device)
         print(f'[reuse analysis] {task}', flush=True); return
     artifacts = {mode:load(root/(mode+'_cbm')/'model.pt') for mode in ('basic','mixed')}
@@ -80,39 +80,50 @@ def run_analysis(task, cfg, device):
             for source in targets:
                 missing_z, missing_p = predict(model,removed[source]['embedding']) if mode=='basic' else (mz,mp)
                 key = mode+'__'+source
-                names = [cid for cid,g in unit_groups.items() if g['learnable']] if split=='val' else selection['concepts'][key]
+                names = list(unit_groups)  # Include constant/unobserved IDs in the supplementary CSV.
                 restored = []
                 for start in range(0,len(names),32):
                     block = names[start:start+32]
                     restored.append(restoration_batch(model,missing_z,full_z,[unit_groups[cid]['columns'] for cid in block]))
                 restored = np.concatenate(restored)
                 delta = f1(y,restored,cut)-f1(y,missing_p,cut)
+                order = sorted((i for i in range(len(names)) if unit_groups[names[i]]['learnable']),
+                               key=lambda i:(-float(delta[i]),names[i]))
+                ranks = {names[i]:rank+1 for rank,i in enumerate(order)}
                 if split=='val':
-                    order = sorted(range(len(names)),key=lambda i:(-float(delta[i]),names[i]))
                     selection['concepts'][key] = [names[i] for i in order[:10]]
                     write_json(out/'SELECTION.json',selection)
                 chosen = selection['concepts'][key]
+                # A strict bottleneck's all-channel restoration is exactly the
+                # same head applied to the full-input concept vector.
+                names.append('ALL_CONCEPTS')
+                all_restored = restoration_batch(model,missing_z,full_z,[list(range(model.spec['width']))])
+                restored = np.concatenate((restored,all_restored))
                 rows = boot.effects(restored,missing_p,cut,cut)
                 values = boot.intervals(boot.draws(restored,cut))
                 masked_stat = boot.performance(missing_p,cut)
                 for cid,effect,perf in zip(names,rows,values):
-                    g = unit_groups[cid]
+                    g = unit_groups.get(cid,dict(concept_name='All CBM concepts restored together',
+                        source_fields=list(dict.fromkeys(c['source_field'] for c in model.spec['items'])),
+                        columns=list(range(model.spec['width'])),learnable=False))
                     recoveries.append(dict(task=task,split=split,mode=mode,removed_input=source,
                         concept_id=cid,concept_name=g['concept_name'],source_fields=' | '.join(g['source_fields']),
                         channels=len(g['columns']),val_rank=chosen.index(cid)+1 if cid in chosen else None,
-                        family=mode+'_restoration',n=n,threshold=cut,
+                        rank=ranks.get(cid),ranking_split=split,learnable=g['learnable'],
+                        intervention='all_concepts' if cid=='ALL_CONCEPTS' else 'individual',
+                        family=mode+('_all_restoration' if cid=='ALL_CONCEPTS' else '_restoration'),n=n,threshold=cut,
                         full_f1=float(f1(y,full_p,cut)),masked_f1=masked_stat['value'],
                         restored_f1=perf['value'],restored_ci_lower=perf['ci_lower'],restored_ci_upper=perf['ci_upper'],**effect))
                 table = pd.DataFrame(restored.T,columns=names)
                 table.insert(0,'masked_probability',missing_p);table.insert(0,'y',y);table.insert(0,'person_id',basic['person_ids'])
                 table.to_csv(out/f'restoration_{key}_{split}.csv',index=False)
-                print(f'[restore {task}/{split}/{mode}] {source}: {len(names)} IDs; validation top10 fixed',flush=True)
-        # Test is not loaded until all validation modality/concept choices are saved.
+                print(f'[restore {task}/{split}/{mode}] {source}: {len(unit_groups)} IDs + all-concepts reference; ranked on {split}',flush=True)
+        # Modality removals stay validation-selected; concept rankings are split-specific.
         del boot
     for name,rows in [('classification',classification),('comparisons',comparisons),('ablation',ablations),
                        ('restoration',recoveries),('cohorts',cohorts)]:
         pd.DataFrame(rows).to_csv(out/(name+'.csv'),index=False)
-    write_json(out/'DONE.json',dict(task=task,seed=cfg['seed'],bootstrap_samples=cfg['bootstrap_samples']))
+    write_json(out/'DONE.json',dict(task=task,seed=cfg['seed'],bootstrap_samples=cfg['bootstrap_samples'],restoration_version=2))
     add_balanced_accuracy(task, cfg, device)
 
 

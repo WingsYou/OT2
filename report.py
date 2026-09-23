@@ -31,6 +31,7 @@ def prob(value): return f'{value:.4g}'
 def make_report(cfg):
     root = Path(cfg['output_root']); out = root/'tables'; out.mkdir(exist_ok=True)
     completed = [t for t in cfg['tasks'] if (root/t/'analysis/DONE.json').exists()
+                 and read_json(root/t/'analysis/DONE.json').get('restoration_version')==2
                  and read_json(root/t/'analysis/DONE.json').get('reported_metrics')==['f1','balanced_accuracy']]
     if not completed: return
     frames = {}
@@ -49,12 +50,12 @@ def make_report(cfg):
             f'Completed tasks: {len(completed)}/{len(cfg["tasks"])}. Seed {cfg["seed"]}. '
             f'{cfg["bootstrap_samples"]:,} participant bootstrap resamples. Positive-class F1 and balanced accuracy (BA).', '',
             'Training uses exact class-balanced oversampling. Validation and test retain their original participants and class proportions. '
-            'Checkpoint selection, F1 thresholds, the top three modality removals, and the top ten Concept IDs per removal use validation only. '
-            'BA uses the same frozen F1-selected thresholds; it does not reselect models or rankings. Test tables retain the validation ranks; a top-ranked effect can be zero or negative.', '',
+            'Checkpoint selection, F1 thresholds and top-three modality removals use validation only. All Concept IDs are evaluated on each split; displayed concept Top 10 is ranked on that same split by F1 recovery. '
+            'BA uses the same frozen F1-selected thresholds; it does not reselect models or rankings. Test concept ranks are exploratory test-derived results, not validation-selected confirmation; a top-ranked effect can be zero or negative.', '',
             'Intervals are paired, outcome-stratified percentile 95% CIs. Differences are absolute changes in the named metric. '
             'Two-sided p values use participant-level prediction swaps; q values use Benjamini–Hochberg adjustment within each analysis family '
-            '(downstream comparisons, CBM comparisons, modality ablations, Basic restoration, Mixed restoration), across all completed tasks, separately per split and metric. '
-            'Validation restoration correction includes every screened learnable ID, not only the displayed top ten. '
+            '(downstream comparisons, CBM comparisons, modality ablations, individual-ID restoration by CBM mode, and all-concept restoration by CBM mode), across all completed tasks, separately per split and metric. '
+            'Individual-restoration correction includes every tested ID, not only the displayed top ten, in each split. '
             'Validation findings are exploratory. A single seed does not measure retraining variability. '
             'Previously inspected test data are not a new independent confirmatory cohort.', '',
             '## Evaluation cohorts', '',
@@ -102,24 +103,35 @@ def make_report(cfg):
             '**Recovery = restored − masked**, separately for F1 and BA. Each intervention replaces all channels of one Concept ID with the same participant’s '
             'unperturbed predicted channels. Source fields are listed together when they share that ID. '
             'This is a diagnostic substitution using a full-input reference, not autonomous reconstruction from missing inputs or replacement with measured labels. '
-            'Only individual IDs are restored; the top ten are not restored jointly.', '']
+            'Individual IDs and an all-channel intervention are evaluated. All-channel restoration must reproduce the same CBM’s full-input prediction because the classifier has no bypass; it is a reference endpoint, not evidence of autonomous reconstruction. The top ten are not restored jointly.', '',
+            '### All concepts restored simultaneously', '',
+            md(['Task','CBM','Removed input','Masked F1 / BA','All restored F1 [95% CI]','All restored BA [95% CI]','F1 recovery [95% CI]','BA recovery [95% CI]'],
+               [[TASK_LABELS[x.task],x.mode,INPUT_LABELS.get(x.removed_input,'Nonbasic clinical inputs'),
+                 f'{x.masked_f1:.4f} / {x.masked_ba:.4f}',
+                 f'{x.restored_f1:.4f} [{x.restored_ci_lower:.4f}, {x.restored_ci_upper:.4f}]',
+                 f'{x.restored_ba:.4f} [{x.restored_ba_ci_lower:.4f}, {x.restored_ba_ci_upper:.4f}]',
+                 interval(x._asdict(),True),interval(x._asdict(),True,'ba_')]
+                for x in r[r.intervention=='all_concepts'].itertuples()]),
+            f'Complete individual-ID results: `CONCEPT_RESTORATION_ALL_{split}.csv`. Joint all-channel results: `ALL_CONCEPTS_RESTORED_{split}.csv` (including p/q values).', '']
         for mode in ('basic','mixed'):
             lines += [f'### {"Basic CBM: top-three modality removals" if mode=="basic" else "Mixed CBM: nonbasic clinical inputs removed"}', '']
             for t in completed:
                 sources=read_json(root/t/'analysis/SELECTION.json')['top_modalities'] if mode=='basic' else ['nonbasic_clinical']
                 for source in sources:
-                    z=r[(r.task==t)&(r['mode']==mode)&(r.removed_input==source)&r.val_rank.notna()].sort_values('val_rank')
+                    z=r[(r.task==t)&(r['mode']==mode)&(r.removed_input==source)&(r.intervention=='individual')&r['rank'].notna()].sort_values('rank').head(10)
                     first=z.iloc[0]
                     label=INPUT_LABELS.get(source,'Nonbasic clinical inputs')
                     lines += [f'#### {TASK_LABELS[t]} — {label}', '',
                         f'Unperturbed CBM: F1 {first.full_f1:.4f}, BA {first.full_ba:.4f}; masked CBM: F1 {first.masked_f1:.4f}, BA {first.masked_ba:.4f}.', '',
-                        md(['Val rank','Concept ID','Concept (recorded terminology)','Source fields restored together','Restored F1 / BA','F1 recovery [95% CI]','F1 p','F1 q','BA recovery [95% CI]','BA p','BA q'],
-                           [[int(x.val_rank),x.concept_id,x.concept_name,x.source_fields,f'{x.restored_f1:.4f} / {x.restored_ba:.4f}',interval(x._asdict(),True),prob(x.p_value),prob(x.q_value),interval(x._asdict(),True,'ba_'),prob(x.ba_p_value),prob(x.ba_q_value)] for x in z.itertuples()])]
+                        md([split.title()+' F1 rank','Concept ID','Concept (recorded terminology)','Source fields restored together','Restored F1 / BA','F1 recovery [95% CI]','F1 p','F1 q','BA recovery [95% CI]','BA p','BA q'],
+                           [[int(x.rank),x.concept_id,x.concept_name,x.source_fields,f'{x.restored_f1:.4f} / {x.restored_ba:.4f}',interval(x._asdict(),True),prob(x.p_value),prob(x.q_value),interval(x._asdict(),True,'ba_'),prob(x.ba_p_value),prob(x.ba_q_value)] for x in z.itertuples()])]
         lines += ['## Thresholds', '',
             md(['Task','Model / input condition','Validation-selected threshold'],
                [[TASK_LABELS[x.task],MODEL_NAMES[x.model],f'{x.threshold:.6f}'] for x in c.itertuples()]),
             'The Concept-ID definitions, fitted encodings, labels and training logs are stored in the task/CBM directories. '
             'Task outcome exclusions, the four-survey restriction, and the four previously removed administrative IDs remain in effect. '
             'All prediction files are participant-level and remain in the local result directory.', '']
+        r[r.intervention=='individual'].sort_values(['task','mode','removed_input','rank'],na_position='last').to_csv(out/f'CONCEPT_RESTORATION_ALL_{split}.csv',index=False)
+        r[r.intervention=='all_concepts'].to_csv(out/f'ALL_CONCEPTS_RESTORED_{split}.csv',index=False)
         (out/f'SUMMARY_{split}.md').write_text('\n'.join(lines))
     print(f'[tables] {len(completed)}/{len(cfg["tasks"])} tasks: {out}',flush=True)

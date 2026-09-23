@@ -34,7 +34,7 @@ Rerun the same command after interruption. Completed stages are skipped; interru
 
 Optional stages: `--stage train`, `--stage analyze`, `--stage report`. `all` is the default. `analyze` uses the new fitted models/features; `report` rebuilds tables from saved analysis CSVs. GPU numbers are relative to `CUDA_VISIBLE_DEVICES` when set by the scheduler. Each worker receives one GPU; up to four independent task/model jobs run concurrently. No model-parallel setup is needed.
 
-## Upgrade an already completed F1 run (no retraining)
+## Update completed results: all IDs, test ranking and all-channel restoration
 
 ```bash
 git pull origin main
@@ -42,32 +42,52 @@ python -u run.py --stage analyze --devices 0 1 2 3
 ```
 
 For a non-default result directory, add `--config /path/to/results/runtime.yaml`.
-This reads saved participant-level predictions and adds balanced accuracy (BA),
-95% CIs, and paired p values to classification, comparisons, ablations and concept
-restoration. Reports also include BA q values, corrected separately from F1.
-Existing F1 results, checkpoints, thresholds, Top 3 removals and Top 10 Concept IDs
-are retained. No model inference or training is needed for a completed run.
-Both updated summaries remain under `tables/SUMMARY_val.md` and `SUMMARY_test.md`.
-Use `analyze`, not `report`, for the first upgrade: the latter only formats existing statistics.
+Existing checkpoints and cached embeddings are reused; no model is retrained and
+no preprocessing is rerun. The first upgrade reruns the small CBM heads to evaluate
+all Concept IDs on test, because older runs saved only the validation-selected ten.
+Subsequent unchanged analysis runs reuse the completed results.
 
-BA is `(sensitivity + specificity) / 2` and uses the same F1-selected threshold.
-It is an additional evaluation metric, not a new training or ranking objective.
-The all-positive reference is explicitly labeled **no model**; its BA is 0.5.
+For both Basic and Mixed CBM, every ID is exported to CSV, including constant or
+unobserved IDs (`learnable=false`, no rank). Learnable IDs are ranked separately
+within val and test by F1 recovery. The MD displays that split's Top 10. **Test
+rankings are exploratory descriptions of test results, not held-out confirmation
+of validation-selected concepts.** Thresholds and the Basic model's top-three
+modality removals remain validation-selected.
+
+Both F1 and balanced accuracy (BA), CIs and paired p/q values are retained.
+BA uses the same F1-selected threshold and is not a new ranking objective.
+All-channel restoration is also evaluated for each Basic removal and for Mixed
+CBM with nonbasic clinical inputs removed (Basic23 plus other modalities remain).
+It replaces the entire concept vector with the same participant's unperturbed
+predicted vector. Since this strict CBM has no bypass, this must equal that CBM's
+full-input performance; it is a diagnostic reference, not autonomous reconstruction.
+
+Files under `tables/`:
+
+- `SUMMARY_val.md`, `SUMMARY_test.md`: Top 10 plus all-channel restoration tables.
+- `CONCEPT_RESTORATION_ALL_val.csv`, `CONCEPT_RESTORATION_ALL_test.csv`: every ID,
+  professional name, source fields, learnability, split-specific rank, masked/full/
+  restored performance, recovery, 95% CIs and p/q for F1 and BA.
+- `ALL_CONCEPTS_RESTORED_val.csv`, `ALL_CONCEPTS_RESTORED_test.csv`: simultaneous
+  restoration of every channel, including absolute performance and recovery.
+
+These supplementary CSVs contain aggregate results, not participant records.
+Use `analyze`, not `report`, for the first upgrade; `report` only formats existing statistics.
 
 ## Experiments retained
 
-| Experiment | What is fitted / compared | Validation selection |
+| Experiment | What is fitted / compared | Selection / reporting |
 |---|---|---|
 | Downstream classification | Full Clinical; the same Full model with only Basic Clinical available; separately retrained Basic Clinical | Each fitted classifier's best checkpoint and F1 threshold |
 | Modality ablation | Remove each of nine sources, all four retinal sources, or both wearable sources from the Basic model | Top **3 of 11** removals by F1 drop |
 | Basic CBM | Frozen new Basic model → predicted concepts → new classifier | Concept warm-up, head fitting, joint readout tuning |
 | Mixed CBM | Frozen new Full model → one shared CBM trained on paired full and basic-only clinical inputs | Model/threshold selection on basic-only validation inputs; evaluate both views |
-| Basic concept restoration | For each selected removal, restore each Concept ID's channels from that participant's unperturbed Basic-CBM predictions | Top **10 IDs per removal**, ranked by F1 recovery |
-| Mixed concept restoration | Only basic clinical inputs available; restore each ID from that participant's full-input Mixed-CBM predictions | Top **10 IDs**, ranked by F1 recovery |
+| Basic concept restoration | For each selected removal, restore each Concept ID's channels from that participant's unperturbed Basic-CBM predictions | All IDs evaluated; split-specific Top **10** by F1 recovery |
+| Mixed concept restoration | Only basic clinical inputs available; restore each ID from that participant's full-input Mixed-CBM predictions | All IDs evaluated; split-specific Top **10** by F1 recovery |
 
 All conditions retain the other eight modalities unless the experiment explicitly removes them. “Basic Clinical” means the previously agreed **23 encoded basic features**. Full models keep the existing task-specific clinical views, including the historical MoCA-derived full view for the three history tasks; each history endpoint's own target fields are excluded as before.
 
-Single-source and family removals can overlap in the top three. Their effects are not additive. Rankings include the largest numerical effects even when fewer than three/ten effects are positive. Test evaluation uses exactly the validation-selected lists and ranks. The retired all-eight-nonclinical removal, original12/expanded13 comparisons, concept-family grouping, field-level ranking, measured-value substitution, and joint-top-k restoration are not run.
+Single-source and family removals can overlap in the top three. Their effects are not additive. Rankings include the largest numerical effects even when fewer than three/ten effects are positive. Test uses validation-selected modality removals but independently ranks concepts on test. Every concept remains available in the supplementary CSV. The retired all-eight-nonclinical removal, original12/expanded13 comparisons, concept-family grouping, field-level ranking, measured-value substitution, and joint-top-k restoration are not run.
 
 ## Training and concept definitions
 
@@ -89,10 +109,10 @@ Concept encodings and feature normalization are fitted on unique training partic
 - Full-model basic-only inference uses the Full model's original threshold. Basic ablations/restorations keep their unperturbed classifier/CBM thresholds. Both Mixed views/restorations use the threshold selected on masked validation inputs.
 - F1 **drop** = baseline − removed; F1 **recovery** = restored − removed. Report point estimates and percentile 95% confidence intervals from 10,000 **paired participant**, outcome-stratified bootstrap draws.
 - Two-sided p values use 10,000 within-participant prediction-swap permutations. This tests paired prediction exchangeability conditional on the fitted models/thresholds, rather than treating bootstrap draws as independent training runs. Identical decisions give p = 1. Minimum Monte Carlo p is 1/10,001.
-- Benjamini–Hochberg q values are calculated separately by metric for downstream comparisons, CBM comparisons, modality ablations, Basic restoration and Mixed restoration, across the six tasks within each split. Validation includes every screened learnable concept; test includes only the preselected IDs. Final q values require all six tasks to finish.
+- Benjamini–Hochberg q values are calculated separately by metric for downstream comparisons, CBM comparisons, modality ablations, Basic restoration and Mixed restoration, across the six tasks within each split. Both splits include every tested individual ID in the correction, not just Top 10. All-channel restoration uses separate Basic/Mixed test families. Final q values require all six tasks to finish.
 - All main comparisons use the same full cohort for each task/split. Available-source counts are included in the ablation CSV; no additional availability subgroup experiment is introduced.
 
-The supplied reference paper motivates reporting performance, paired changes, CIs and corrected significance. Its five-generation Wilcoxon/Mann–Whitney design is not copied into a single-seed patient-level F1 experiment. Bootstrap CIs here condition on the trained model, chosen threshold and observed class counts; they do not include training-seed or threshold-selection uncertainty. Validation results remain exploratory. The previously inspected test split is not a newly untouched confirmatory cohort.
+The supplied reference paper motivates reporting performance, paired changes, CIs and corrected significance. Its five-generation Wilcoxon/Mann–Whitney design is not copied into a single-seed patient-level F1 experiment. Bootstrap CIs here condition on the trained model, chosen threshold and observed class counts; they do not include training-seed or threshold-selection uncertainty. Validation results and test-ranked concept findings remain exploratory; the intervals do not correct for selecting the largest test effects. The previously inspected test split is not a newly untouched confirmatory cohort.
 
 High positive prevalence can make an all-positive classifier's F1 high. Each report includes class counts and that F1 reference, so an apparently high F1 is not automatically interpreted as good discrimination. Oversampling does not guarantee better F1 or larger ablation effects.
 
@@ -120,7 +140,7 @@ output_root/
 | `data.py`, `common.py` | Existing input/cache readers, Basic23 selection and source definitions |
 | `train.py`, `vendor/task2_v2_model.py` | Multimodal fitting, source-token ablation and feature export |
 | `cbm/labels.py`, `cbm/model.py`, `cbm/experiment.py` | Approved labels, typed bottleneck, two CBM training modes |
-| `analysis.py`, `stats.py`, `report.py` | Validation rankings, restoration, paired F1 statistics and English reports |
+| `analysis.py`, `stats.py`, `report.py` | Modality selection, split-specific concept rankings, F1/BA statistics and English reports |
 | `data_preprocessing_cluster/` | Preserved preprocessing source; not invoked by the new runner |
 
 Only code/configuration belong in Git. Raw data, patient-level predictions, labels and checkpoints remain on the cluster. Old experiment implementations remain available in Git history (before this F1 refactor). See [PREPARATION.md](PREPARATION.md) for the retained optional input-preparation recipe.
