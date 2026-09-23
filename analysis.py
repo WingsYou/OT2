@@ -13,7 +13,9 @@ from cbm.experiment import concept_id_groups, restoration_batch
 def run_analysis(task, cfg, device):
     root = Path(cfg['output_root'])/task
     out = root/'analysis'; out.mkdir(exist_ok=True)
-    if (out/'DONE.json').exists(): print(f'[reuse analysis] {task}', flush=True); return
+    if (out/'DONE.json').exists():
+        add_balanced_accuracy(task, cfg, device)
+        print(f'[reuse analysis] {task}', flush=True); return
     artifacts = {mode:load(root/(mode+'_cbm')/'model.pt') for mode in ('basic','mixed')}
     models = {mode:restore(a, device) for mode,a in artifacts.items()}
     groups = {mode:concept_id_groups(a['spec']['items']) for mode,a in artifacts.items()}
@@ -111,3 +113,59 @@ def run_analysis(task, cfg, device):
                        ('restoration',recoveries),('cohorts',cohorts)]:
         pd.DataFrame(rows).to_csv(out/(name+'.csv'),index=False)
     write_json(out/'DONE.json',dict(task=task,seed=cfg['seed'],bootstrap_samples=cfg['bootstrap_samples']))
+    add_balanced_accuracy(task, cfg, device)
+
+
+def add_balanced_accuracy(task, cfg, device):
+    """Upgrade completed F1 results from saved predictions, without refitting.
+
+    Keep existing F1 estimates, thresholds, and SELECTION.json unchanged.
+    """
+    out = Path(cfg['output_root'])/task/'analysis'
+    done = read_json(out/'DONE.json')
+    if done.get('reported_metrics') == ['f1','balanced_accuracy']: return
+    frames = {name:pd.read_csv(out/(name+'.csv'),dtype={'concept_id':str},float_precision='round_trip')
+              for name in ('classification','comparisons','ablation','restoration')}
+    def assign(frame, index, values):
+        for key,value in values.items(): frame.loc[index,'ba_'+key] = value
+    for split in ('val','test'):
+        pred = pd.read_csv(out/f'predictions_{split}.csv',dtype={'person_id':str},float_precision='round_trip')
+        boot = PairedF1(pred.y.to_numpy(),cfg['bootstrap_samples'],cfg['seed'],device)
+        def performance(p,cut): return boot.performance(p,cut,metric='balanced_accuracy')
+        def effects(a,b,ca,cb): return boot.effects(a,b,ca,cb,metric='balanced_accuracy')
+        c = frames['classification']; subset = c[c.split==split]
+        cuts = dict(zip(subset.model,subset.threshold))
+        for i,row in subset.iterrows():
+            assign(c,i,performance(pred[row.model+'__decision'].to_numpy(),.5))
+        e = frames['comparisons']
+        for i,row in e[e.split==split].iterrows():
+            assign(e,i,effects(pred[row.minuend+'__decision'].to_numpy(),pred[row.subtrahend+'__decision'].to_numpy(),.5,.5)[0])
+        a = frames['ablation']
+        for i,row in a[a.split==split].iterrows():
+            removed = pred['without__'+row.removed_input].to_numpy(np.float32)
+            assign(a,i,effects(pred.basic__decision.to_numpy(),removed,.5,cuts['basic'])[0])
+            a.loc[i,'full_ba'] = performance(pred.basic__decision.to_numpy(),.5)['value']
+            a.loc[i,'removed_ba'] = performance(removed,cuts['basic'])['value']
+        r = frames['restoration']
+        for (mode,source),part in r[r.split==split].groupby(['mode','removed_input'],sort=False):
+            saved = pd.read_csv(out/f'restoration_{mode}__{source}_{split}.csv',dtype={'person_id':str},float_precision='round_trip')
+            if saved.person_id.tolist()!=pred.person_id.tolist() or not np.array_equal(saved.y,pred.y):
+                raise ValueError('Restoration predictions must match the classification cohort')
+            cut = float(part.threshold.iloc[0]); ids = part.concept_id.tolist()
+            # CSV contains shortest float32 decimals; restore the original dtype
+            # before comparing with the saved threshold (including exact ties).
+            restored = saved[ids].to_numpy(np.float32).T
+            masked = saved.masked_probability.to_numpy(np.float32)
+            rows = effects(restored,masked,cut,cut)
+            perfs = boot.intervals(boot.draws(restored,cut,metric='balanced_accuracy'))
+            full_name = 'basic_cbm' if mode=='basic' else 'mixed_full'
+            full_ba = performance(pred[full_name+'__decision'].to_numpy(),.5)['value']
+            masked_ba = performance(masked,cut)['value']
+            for index,effect,perf in zip(part.index,rows,perfs):
+                assign(r,index,effect)
+                r.loc[index,'full_ba']=full_ba; r.loc[index,'masked_ba']=masked_ba
+                r.loc[index,'restored_ba']=perf['value']
+                r.loc[index,'restored_ba_ci_lower']=perf['ci_lower'];r.loc[index,'restored_ba_ci_upper']=perf['ci_upper']
+        print(f'[balanced accuracy] {task}/{split}: saved predictions; no training',flush=True)
+    for name,frame in frames.items(): frame.to_csv(out/(name+'.csv'),index=False)
+    done['reported_metrics']=['f1','balanced_accuracy']; write_json(out/'DONE.json',done)

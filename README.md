@@ -1,4 +1,4 @@
-# OT2 — six-task F1 study
+# OT2 — six-task F1 and balanced accuracy study
 
 One entry point runs the six requested experiment types using **existing processed inputs**. It fits new Full and Basic multimodal models, fits two concept bottlenecks, and writes validation/test tables. The raw preprocessing definitions are unchanged.
 
@@ -18,7 +18,7 @@ Defaults in [study.yaml](study.yaml):
 - Read-only input/cache root: `/data/pzhao3/ot2_output/six_task_study_v1_20260913`.
 - New results: `/data/pzhao3/ot2_output/ot2_f1_study_v1_20260922`.
 - Raw clinical CSV directory: the existing AI-READI `dataset/clinical_data` directory.
-- **Seed 42, positive-class F1, 10,000 bootstrap resamples.**
+- **Seed 42, positive-class F1 + balanced accuracy, 10,000 bootstrap resamples.**
 
 The source root must contain `inputs.json`, `full_clinical_presence.json`, `cache/dimensions.json`, and `cache/people/*.pt` from the earlier six-task run. `inputs.json` points to the existing task masters, clinical tables and fitted scalers. These files and cache tensors are reused without rebuilding them. Old fitted models, fusion embeddings and CBMs are **not** reused.
 
@@ -33,6 +33,26 @@ python -u run.py --devices 0 1 2 3 \
 Rerun the same command after interruption. Completed stages are skipped; interrupted multimodal fitting resumes from its last saved epoch. An interrupted small CBM fit restarts that CBM only. Use a new output directory when changing the experimental settings. A small `runtime.yaml` records settings; there are no code bundles, SHA manifests, or chained audit requirements.
 
 Optional stages: `--stage train`, `--stage analyze`, `--stage report`. `all` is the default. `analyze` uses the new fitted models/features; `report` rebuilds tables from saved analysis CSVs. GPU numbers are relative to `CUDA_VISIBLE_DEVICES` when set by the scheduler. Each worker receives one GPU; up to four independent task/model jobs run concurrently. No model-parallel setup is needed.
+
+## Upgrade an already completed F1 run (no retraining)
+
+```bash
+git pull origin main
+python -u run.py --stage analyze --devices 0 1 2 3
+```
+
+For a non-default result directory, add `--config /path/to/results/runtime.yaml`.
+This reads saved participant-level predictions and adds balanced accuracy (BA),
+95% CIs, and paired p values to classification, comparisons, ablations and concept
+restoration. Reports also include BA q values, corrected separately from F1.
+Existing F1 results, checkpoints, thresholds, Top 3 removals and Top 10 Concept IDs
+are retained. No model inference or training is needed for a completed run.
+Both updated summaries remain under `tables/SUMMARY_val.md` and `SUMMARY_test.md`.
+Use `analyze`, not `report`, for the first upgrade: the latter only formats existing statistics.
+
+BA is `(sensitivity + specificity) / 2` and uses the same F1-selected threshold.
+It is an additional evaluation metric, not a new training or ranking objective.
+The all-positive reference is explicitly labeled **no model**; its BA is 0.5.
 
 ## Experiments retained
 
@@ -61,15 +81,15 @@ The approved **task-specific, four-survey concept inventory** is used, not the o
 
 Both CBMs retain the existing small concept predictor and 32-unit classification head, with no direct embedding bypass. Training comprises concept-only warm-up, head fitting, then joint concept/head tuning with `BCE + λ × masked concept loss` (λ = 1). Numeric targets use MSE; categorical targets use cross-entropy. Mixed training equally weights the full and masked view of each sampled participant. Backbone weights stay frozen. The joint checkpoint must retain each evaluable concept's validation loss within 10% of its sequential reference; otherwise the sequential model is retained and reported in `DONE.json`. No extra joint-loss sweep is performed.
 
-Concept encodings and feature normalization are fitted on unique training participants before oversampling. Concept warm-up selects validation concept loss; head/joint phases select validation F1, with BCE as a tie-breaker. Continuous concept loss is still necessary for supervision even though downstream reporting is F1-only.
+Concept encodings and feature normalization are fitted on unique training participants before oversampling. Concept warm-up selects validation concept loss; head/joint phases select validation F1, with BCE as a tie-breaker. Continuous concept loss is still necessary for supervision even though downstream reporting uses classification metrics.
 
-## F1 and statistics
+## F1, balanced accuracy, and statistics
 
 - Threshold = highest threshold attaining maximum positive-class validation F1. Checkpoint ties use lower validation BCE.
 - Full-model basic-only inference uses the Full model's original threshold. Basic ablations/restorations keep their unperturbed classifier/CBM thresholds. Both Mixed views/restorations use the threshold selected on masked validation inputs.
 - F1 **drop** = baseline − removed; F1 **recovery** = restored − removed. Report point estimates and percentile 95% confidence intervals from 10,000 **paired participant**, outcome-stratified bootstrap draws.
 - Two-sided p values use 10,000 within-participant prediction-swap permutations. This tests paired prediction exchangeability conditional on the fitted models/thresholds, rather than treating bootstrap draws as independent training runs. Identical decisions give p = 1. Minimum Monte Carlo p is 1/10,001.
-- Benjamini–Hochberg q values are calculated separately for downstream comparisons, CBM comparisons, modality ablations, Basic restoration and Mixed restoration, across the six tasks within each split. Validation includes every screened learnable concept; test includes only the preselected IDs. Final q values require all six tasks to finish.
+- Benjamini–Hochberg q values are calculated separately by metric for downstream comparisons, CBM comparisons, modality ablations, Basic restoration and Mixed restoration, across the six tasks within each split. Validation includes every screened learnable concept; test includes only the preselected IDs. Final q values require all six tasks to finish.
 - All main comparisons use the same full cohort for each task/split. Available-source counts are included in the ablation CSV; no additional availability subgroup experiment is introduced.
 
 The supplied reference paper motivates reporting performance, paired changes, CIs and corrected significance. Its five-generation Wilcoxon/Mann–Whitney design is not copied into a single-seed patient-level F1 experiment. Bootstrap CIs here condition on the trained model, chosen threshold and observed class counts; they do not include training-seed or threshold-selection uncertainty. Validation results remain exploratory. The previously inspected test split is not a newly untouched confirmatory cohort.

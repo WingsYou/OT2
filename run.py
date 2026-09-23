@@ -61,7 +61,7 @@ def pool(jobs,devices,config,root,after=None):
         selector.close()
 
 def main():
-    p=argparse.ArgumentParser(description='F1-only six-task study from existing processed inputs/cache.')
+    p=argparse.ArgumentParser(description='F1/BA six-task study from existing processed inputs/cache.')
     p.add_argument('--config',type=Path,default=HERE/'study.yaml')
     p.add_argument('--devices',nargs='+');p.add_argument('--source-root',type=Path)
     p.add_argument('--output-root',type=Path)

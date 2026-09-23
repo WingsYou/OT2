@@ -1,4 +1,4 @@
-"""Positive-class F1, train-only balancing, and paired participant inference."""
+"""Positive-class F1, balanced accuracy, train-only balancing, and paired participant inference."""
 import numpy as np
 import torch
 from torch.utils.data import Sampler
@@ -71,13 +71,19 @@ class PairedF1:
     def decisions(self, p, cut):
         return torch.as_tensor(np.atleast_2d(np.asarray(p) >= cut), dtype=torch.float64, device=self.device)
 
-    def draws(self, p, cut):
+    @staticmethod
+    def score(tp, predicted, positive, total, metric):
+        if metric == 'balanced_accuracy':
+            return .5*(tp/positive + (total-positive-predicted+tp)/(total-positive))
+        return 2*tp/(predicted+positive).clamp_min(1)
+
+    def draws(self, p, cut, metric='f1'):
         d = self.decisions(p, cut)
         tp = (d * self.truth) @ self.w.T
         predicted = d @ self.w.T
-        return (2 * tp / (predicted + self.positive).clamp_min(1)).cpu().numpy()
+        return self.score(tp, predicted, self.positive, self.w.sum(1), metric).cpu().numpy()
 
-    def pvalues(self, a, b, cut_a, cut_b):
+    def pvalues(self, a, b, cut_a, cut_b, metric='f1'):
         a = self.decisions(a, cut_a); b = self.decisions(b, cut_b)
         a, b = torch.broadcast_tensors(a, b)
         # Swapping only changes predicted positives and true positives.
@@ -86,8 +92,9 @@ class PairedF1:
         ap, bp = a.sum(1, keepdim=True), b.sum(1, keepdim=True)
         at, bt = (a*self.truth).sum(1, keepdim=True), (b*self.truth).sum(1, keepdim=True)
         npos = self.truth.sum()
-        observed = 2*at/(ap+npos).clamp_min(1) - 2*bt/(bp+npos).clamp_min(1)
-        null = 2*(at+change_tp)/(ap+change+npos).clamp_min(1) - 2*(bt-change_tp)/(bp-change+npos).clamp_min(1)
+        def score(tp, predicted): return self.score(tp, predicted, npos, len(self.y), metric)
+        observed = score(at, ap) - score(bt, bp)
+        null = score(at+change_tp, ap+change) - score(bt-change_tp, bp-change)
         return ((1+(null.abs() >= observed.abs()-1e-12).sum(1))/(self.samples+1)).cpu().numpy()
 
     @staticmethod
@@ -97,12 +104,12 @@ class PairedF1:
         return [dict(value=float(d[0]), ci_lower=float(lo), ci_upper=float(hi))
                 for d, lo, hi in zip(draws, *ci)]
 
-    def performance(self, p, cut):
-        return self.intervals(self.draws(p, cut))[0]
+    def performance(self, p, cut, metric='f1'):
+        return self.intervals(self.draws(p, cut, metric))[0]
 
-    def effects(self, a, b, cut_a, cut_b):
-        """Effect = F1(a) - F1(b); all draws use the same participants."""
-        rows = self.intervals(self.draws(a, cut_a)-self.draws(b, cut_b))
-        for row, p in zip(rows, self.pvalues(a, b, cut_a, cut_b)):
+    def effects(self, a, b, cut_a, cut_b, metric='f1'):
+        """Effect = metric(a) - metric(b); all draws use the same participants."""
+        rows = self.intervals(self.draws(a, cut_a, metric)-self.draws(b, cut_b, metric))
+        for row, p in zip(rows, self.pvalues(a, b, cut_a, cut_b, metric)):
             row['p_value'] = float(p)
         return rows

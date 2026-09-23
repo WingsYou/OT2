@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, balanced_accuracy_score
 from common import MODALITIES, REMOVALS, read_json, write_json, save_torch
 from stats import balanced_indices, f1, threshold, PairedF1, bh_adjust
 from train import run_model, load
@@ -41,6 +41,18 @@ class F1StudyTests(unittest.TestCase):
         self.assertEqual(effect,dict(value=0.,ci_lower=0.,ci_upper=0.,p_value=1.))
         self.assertAlmostEqual(boot.effects(p,other,cut,cut)[0]['p_value'],boot.effects(other,p,cut,cut)[0]['p_value'])
         np.testing.assert_allclose(bh_adjust([.01,.04,.03]),[.03,.04,.04])
+        ba=boot.draws(np.stack([p,other]),cut,metric='balanced_accuracy')
+        np.testing.assert_allclose(ba[:,0],[balanced_accuracy_score(y,v>=cut) for v in (p,other)])
+        for i in (1,2,499):
+            sample=np.repeat(np.arange(len(y)),weights[i])
+            self.assertAlmostEqual(ba[0,i],balanced_accuracy_score(y[sample],p[sample]>=cut))
+        np.testing.assert_allclose(boot.draws(np.ones(len(y)),.5,metric='balanced_accuracy'),.5)
+        a,b=p>=cut,other>=cut
+        observed=balanced_accuracy_score(y,a)-balanced_accuracy_score(y,b)
+        null=[balanced_accuracy_score(y,np.where(s,b,a))-balanced_accuracy_score(y,np.where(s,a,b))
+              for s in boot.swaps.cpu().numpy().astype(bool)]
+        expected=(1+sum(abs(v)>=abs(observed)-1e-12 for v in null))/501
+        self.assertAlmostEqual(boot.effects(p,other,cut,cut,metric='balanced_accuracy')[0]['p_value'],expected)
 
     def test_approved_inventory(self):
         bank=load_bank(observation_forms=FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS)
@@ -107,6 +119,22 @@ class F1StudyTests(unittest.TestCase):
             removed=load(out/task/'basic/removals_val.pt')
             np.testing.assert_allclose(removed['environment']['probability'][-1],cache['original_logits'].sigmoid().numpy()[-1],atol=1e-7)
             run_analysis(task,cfg,torch.device('cpu'));make_report(cfg)
+            # A completed F1-only run upgrades from CSVs without loading models.
+            analysis=out/task/'analysis'; selected_before=(analysis/'SELECTION.json').read_bytes()
+            original={}
+            for name in ('classification','comparisons','ablation','restoration'):
+                df=pd.read_csv(analysis/(name+'.csv'),dtype={'concept_id':str},float_precision='round_trip')
+                original[name]=df
+                cols=[c for c in df if not c.startswith('ba_') and c not in ('full_ba','removed_ba','masked_ba','restored_ba','restored_ba_ci_lower','restored_ba_ci_upper')]
+                df[cols].to_csv(analysis/(name+'.csv'),index=False)
+            done=read_json(analysis/'DONE.json');done.pop('reported_metrics');write_json(analysis/'DONE.json',done)
+            with patch('analysis.restore',side_effect=AssertionError('must not load CBM')):
+                run_analysis(task,cfg,torch.device('cpu'))
+            self.assertEqual(selected_before,(analysis/'SELECTION.json').read_bytes())
+            for name,before in original.items():
+                after=pd.read_csv(analysis/(name+'.csv'),dtype={'concept_id':str},float_precision='round_trip')
+                pd.testing.assert_frame_equal(before,after,check_exact=False,atol=1e-12,rtol=1e-12)
+            self.assertIn('BA recovery [95% CI]',(out/'tables/SUMMARY_test.md').read_text())
             selection=read_json(out/task/'analysis/SELECTION.json')
             self.assertEqual(len(selection['top_modalities']),3)
             self.assertEqual(len(selection['concepts']),4)

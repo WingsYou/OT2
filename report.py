@@ -1,4 +1,4 @@
-"""English F1-only tables for coauthors, with fixed validation rankings."""
+"""English F1 and balanced-accuracy tables for coauthors, with fixed validation rankings."""
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -20,9 +20,9 @@ def md(headers, rows):
                       *['| '+' | '.join(cell(v) for v in row)+' |' for row in rows]])+'\n'
 
 
-def interval(row, signed=False):
+def interval(row, signed=False, prefix=''):
     fmt = '+.4f' if signed else '.4f'
-    return f'{row["value"]:{fmt}} [{row["ci_lower"]:{fmt}}, {row["ci_upper"]:{fmt}}]'
+    return f'{row[prefix+"value"]:{fmt}} [{row[prefix+"ci_lower"]:{fmt}}, {row[prefix+"ci_upper"]:{fmt}}]'
 
 
 def prob(value): return f'{value:.4g}'
@@ -30,48 +30,52 @@ def prob(value): return f'{value:.4g}'
 
 def make_report(cfg):
     root = Path(cfg['output_root']); out = root/'tables'; out.mkdir(exist_ok=True)
-    completed = [t for t in cfg['tasks'] if (root/t/'analysis/DONE.json').exists()]
+    completed = [t for t in cfg['tasks'] if (root/t/'analysis/DONE.json').exists()
+                 and read_json(root/t/'analysis/DONE.json').get('reported_metrics')==['f1','balanced_accuracy']]
     if not completed: return
     frames = {}
     for name in ('classification','comparisons','ablation','restoration','cohorts'):
         df = pd.concat([pd.read_csv(root/t/'analysis'/(name+'.csv'),dtype={'concept_id':str}) for t in completed],ignore_index=True)
         if 'p_value' in df:
-            df['q_value'] = np.nan
-            for _,idx in df.groupby(['split','family']).groups.items():
-                df.loc[idx,'q_value'] = bh_adjust(df.loc[idx,'p_value'])
+            for prefix in ('','ba_'):
+                df[prefix+'q_value'] = np.nan
+                for _,idx in df.groupby(['split','family']).groups.items():
+                    df.loc[idx,prefix+'q_value'] = bh_adjust(df.loc[idx,prefix+'p_value'])
         frames[name] = df
         df.to_csv(out/(name+'.csv'),index=False)
     for split in ('val','test'):
         c,e,a,r,co = [frames[name].query('split == @split') for name in ('classification','comparisons','ablation','restoration','cohorts')]
-        lines = [f'# OT2 F1 study — {split}', '',
+        lines = [f'# OT2 F1 and balanced accuracy study — {split}', '',
             f'Completed tasks: {len(completed)}/{len(cfg["tasks"])}. Seed {cfg["seed"]}. '
-            f'{cfg["bootstrap_samples"]:,} participant bootstrap resamples. Positive-class F1 throughout.', '',
+            f'{cfg["bootstrap_samples"]:,} participant bootstrap resamples. Positive-class F1 and balanced accuracy (BA).', '',
             'Training uses exact class-balanced oversampling. Validation and test retain their original participants and class proportions. '
             'Checkpoint selection, F1 thresholds, the top three modality removals, and the top ten Concept IDs per removal use validation only. '
-            'Test tables retain the validation ranks; a top-ranked effect can be zero or negative.', '',
-            'Intervals are paired, outcome-stratified percentile 95% CIs. Differences are in F1 units. '
+            'BA uses the same frozen F1-selected thresholds; it does not reselect models or rankings. Test tables retain the validation ranks; a top-ranked effect can be zero or negative.', '',
+            'Intervals are paired, outcome-stratified percentile 95% CIs. Differences are absolute changes in the named metric. '
             'Two-sided p values use participant-level prediction swaps; q values use Benjamini–Hochberg adjustment within each analysis family '
-            '(downstream comparisons, CBM comparisons, modality ablations, Basic restoration, Mixed restoration), across all completed tasks, separately per split. '
+            '(downstream comparisons, CBM comparisons, modality ablations, Basic restoration, Mixed restoration), across all completed tasks, separately per split and metric. '
             'Validation restoration correction includes every screened learnable ID, not only the displayed top ten. '
             'Validation findings are exploratory. A single seed does not measure retraining variability. '
             'Previously inspected test data are not a new independent confirmatory cohort.', '',
             '## Evaluation cohorts', '',
-            md(['Task','N','Positive','Negative','Prevalence','F1 if all predictions are positive'],
+            md(['Task','N','Positive','Negative','Prevalence','All-positive baseline F1 (no model)'],
                [[TASK_LABELS[x.task],x.n,x.positive,x.negative,f'{x.prevalence:.3f}',f'{x.all_positive_f1:.4f}'] for x in co.itertuples()]),
-            '## 1. Downstream classification', '', 'Cells show F1 [95% CI].', '']
+            'All-positive baseline BA is 0.5000 for every task. BA = (sensitivity + specificity) / 2.', '',
+            '## 1. Downstream classification', '', 'Cells show F1 and BA, each with a 95% CI.', '']
         def cell(task,model):
-            return interval(c[(c.task==task)&(c.model==model)].iloc[0])
+            row=c[(c.task==task)&(c.model==model)].iloc[0]
+            return 'F1: '+interval(row)+'<br>BA: '+interval(row,prefix='ba_')
         lines.append(md(['Task',*map(MODEL_NAMES.get,('full','full_basic_inference','basic'))],
             [[TASK_LABELS[t],*[cell(t,m) for m in ('full','full_basic_inference','basic')]] for t in completed]))
         lines += ['## 2. Basic-model modality ablation', '',
-            'Cells show **F1 drop = unperturbed − removed** [95% CI]. Bold cells mark validation-selected top-three removals. '
+            'Cells show **drop = unperturbed − removed** [95% CI], for F1 and BA. Bold cells mark validation-selected top-three removals. '
             'Each comparison uses the same full task cohort; naturally absent sources remain absent. '
             'The CSV also reports how many participants had the removed source(s). Group and single-source removals can overlap.', '']
         matrix=[]
         for source in INPUT_LABELS:
             row=[INPUT_LABELS[source]]
             for t in completed:
-                x=a[(a.task==t)&(a.removed_input==source)].iloc[0]; value=interval(x,True)
+                x=a[(a.task==t)&(a.removed_input==source)].iloc[0]; value='F1: '+interval(x,True)+'<br>BA: '+interval(x,True,'ba_')
                 row.append('**'+value+'**' if pd.notna(x.val_rank) else value)
             matrix.append(row)
         lines.append(md(['Removed input',*[TASK_LABELS[t] for t in completed]],matrix))
@@ -89,13 +93,13 @@ def make_report(cfg):
             '`fitted` denotes a selected joint-tuning epoch; `sequential_fallback` retains the concept-then-head model. '
             'Joint tuning is selected only when its validation F1/BCE improves while satisfying the concept-loss tolerance.', '',
             '## 4. Paired model comparisons', '',
-            md(['Task','Comparison','F1 difference [95% CI]','p','q'],
-               [[TASK_LABELS[x.task],COMPARISON_NAMES[x.comparison],interval(x._asdict(),True),prob(x.p_value),prob(x.q_value)] for x in e.itertuples()]),
+            md(['Task','Comparison','F1 difference [95% CI]','F1 p','F1 q','BA difference [95% CI]','BA p','BA q'],
+               [[TASK_LABELS[x.task],COMPARISON_NAMES[x.comparison],interval(x._asdict(),True),prob(x.p_value),prob(x.q_value),interval(x._asdict(),True,'ba_'),prob(x.ba_p_value),prob(x.ba_q_value)] for x in e.itertuples()]),
             '## 5. Modality-ablation statistics', '',
-            md(['Task','Removed input','F1 drop [95% CI]','p','q'],
-               [[TASK_LABELS[x.task],INPUT_LABELS[x.removed_input],interval(x._asdict(),True),prob(x.p_value),prob(x.q_value)] for x in a.itertuples()]),
+            md(['Task','Removed input','F1 drop [95% CI]','F1 p','F1 q','BA drop [95% CI]','BA p','BA q'],
+               [[TASK_LABELS[x.task],INPUT_LABELS[x.removed_input],interval(x._asdict(),True),prob(x.p_value),prob(x.q_value),interval(x._asdict(),True,'ba_'),prob(x.ba_p_value),prob(x.ba_q_value)] for x in a.itertuples()]),
             '## 6. Concept restoration', '',
-            '**Recovery = restored F1 − masked F1.** Each intervention replaces all channels of one Concept ID with the same participant’s '
+            '**Recovery = restored − masked**, separately for F1 and BA. Each intervention replaces all channels of one Concept ID with the same participant’s '
             'unperturbed predicted channels. Source fields are listed together when they share that ID. '
             'This is a diagnostic substitution using a full-input reference, not autonomous reconstruction from missing inputs or replacement with measured labels. '
             'Only individual IDs are restored; the top ten are not restored jointly.', '']
@@ -108,9 +112,9 @@ def make_report(cfg):
                     first=z.iloc[0]
                     label=INPUT_LABELS.get(source,'Nonbasic clinical inputs')
                     lines += [f'#### {TASK_LABELS[t]} — {label}', '',
-                        f'Unperturbed CBM F1: {first.full_f1:.4f}; masked CBM F1: {first.masked_f1:.4f}.', '',
-                        md(['Val rank','Concept ID','Concept (recorded terminology)','Source fields restored together','Restored F1','F1 recovery [95% CI]','p','q'],
-                           [[int(x.val_rank),x.concept_id,x.concept_name,x.source_fields,f'{x.restored_f1:.4f}',interval(x._asdict(),True),prob(x.p_value),prob(x.q_value)] for x in z.itertuples()])]
+                        f'Unperturbed CBM: F1 {first.full_f1:.4f}, BA {first.full_ba:.4f}; masked CBM: F1 {first.masked_f1:.4f}, BA {first.masked_ba:.4f}.', '',
+                        md(['Val rank','Concept ID','Concept (recorded terminology)','Source fields restored together','Restored F1 / BA','F1 recovery [95% CI]','F1 p','F1 q','BA recovery [95% CI]','BA p','BA q'],
+                           [[int(x.val_rank),x.concept_id,x.concept_name,x.source_fields,f'{x.restored_f1:.4f} / {x.restored_ba:.4f}',interval(x._asdict(),True),prob(x.p_value),prob(x.q_value),interval(x._asdict(),True,'ba_'),prob(x.ba_p_value),prob(x.ba_q_value)] for x in z.itertuples()])]
         lines += ['## Thresholds', '',
             md(['Task','Model / input condition','Validation-selected threshold'],
                [[TASK_LABELS[x.task],MODEL_NAMES[x.model],f'{x.threshold:.6f}'] for x in c.itertuples()]),
