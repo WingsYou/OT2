@@ -2,16 +2,16 @@
 from pathlib import Path
 import pandas as pd
 import torch
-from common import read_json, write_json, save_torch
+from common import read_json, write_json, save_torch, backbone_dir
 from train import load
 from cbm.model import fit
 
 
 def run_cbm(task, mode, cfg, device):
     task_root = Path(cfg['output_root'])/task
-    root = task_root/(mode+'_cbm'); root.mkdir(exist_ok=True)
+    root = task_root/(mode+'_cbm'); root.mkdir(parents=True, exist_ok=True)
     if (root/'DONE.json').exists(): print(f'[reuse] {task}/{mode}_cbm', flush=True); return
-    source = task_root/('basic' if mode=='basic' else 'full')
+    source = backbone_dir(task,cfg)/('basic' if mode=='basic' else 'full')
     train = load(source/'features_train.pt'); val = load(source/'features_val.pt')
     labels = pd.read_csv(Path(cfg['output_root'])/'labels'/task/'labels.csv', dtype=str, keep_default_na=False)
     schema = read_json(Path(cfg['output_root'])/'labels'/task/'schema.json')

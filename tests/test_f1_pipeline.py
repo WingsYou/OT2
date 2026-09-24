@@ -64,6 +64,11 @@ class F1StudyTests(unittest.TestCase):
         self.assertEqual({c['form_name'] for c in obs},set(FOUR_OBSERVATION_FORMS))
         fields={bank['concepts'][k]['source_field'] for k in bank['tasks']['kidney_history_binary']['concept_keys']}
         self.assertNotIn('mhoccur_rnl',fields)
+        reduced=load_bank(observation_forms=(),excluded_ids=SURVEY_ADMIN_IDS)
+        self.assertFalse(any(c['domain']=='Observation' for c in reduced['concepts'].values()))
+        self.assertEqual([p['inventory_ids'] for p in reduced['tasks'].values()],
+                         [n-113 for n in (222,217,220,224,224,224)])
+
 
     def test_small_end_to_end_both_backbones_and_cbms(self):
         torch.set_num_threads(1);torch.manual_seed(7)
@@ -159,8 +164,21 @@ class F1StudyTests(unittest.TestCase):
             done=read_json(analysis/'DONE.json');done.pop('restoration_version');write_json(analysis/'DONE.json',done)
             run_analysis(task,cfg,torch.device('cpu'))
             self.assertEqual(read_json(analysis/'DONE.json')['restoration_version'],2)
+            # A separate CBM experiment reads frozen backbone outputs without copying them.
+            import shutil
+            reused=root/'reused'; (reused/task).mkdir(parents=True)
+            for variant in ('full','basic'):
+                shutil.move(str(out/task/variant),str(reused/task/variant))
+            cfg['backbone_root']=str(reused)
+            for mode in ('basic','mixed'):
+                (out/task/(mode+'_cbm')/'DONE.json').unlink()
+                run_cbm(task,mode,cfg,torch.device('cpu'))
+            (analysis/'DONE.json').unlink()
+            run_analysis(task,cfg,torch.device('cpu'))
+            cfg['exclude_observation']=True; make_report(cfg)
+            self.assertIn('all Observation-domain concepts excluded',(out/'tables/SUMMARY_test.md').read_text())
             artifact=load(out/task/'mixed_cbm/model.pt');model=restore(artifact,'cpu')
-            cache=load(out/task/'full/features_val.pt')
+            cache=load(reused/task/'full/features_val.pt')
             full_z,full_p=predict(model,cache['embedding']);masked_z,_=predict(model,cache['masked_embedding'])
             groups=concept_id_groups(artifact['spec']['items']);self.assertEqual(len(groups['100']['columns']),2)
             columns=groups['100']['columns'];direct=masked_z.clone();direct[:,columns]=full_z[:,columns]

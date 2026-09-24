@@ -19,7 +19,8 @@ def main():
         run_analysis(a.task,cfg,device)
     else:
         from train import run_model
-        run_model(a.task,a.variant,cfg,device)
+        if not cfg.get('backbone_root'):
+            run_model(a.task,a.variant,cfg,device)
         if device.type=='cuda':torch.cuda.empty_cache()
         from cbm.experiment import run_cbm
         run_cbm(a.task,'basic' if a.variant=='basic' else 'mixed',cfg,device)

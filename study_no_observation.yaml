@@ -1,0 +1,36 @@
+# Existing processed inputs + normalized native/ResNet cache. Read-only.
+source_root: /data/pzhao3/ot2_output/six_task_study_v1_20260913
+output_root: /data/pzhao3/ot2_output/ot2_cbm_no_observation_v1_20260923
+# Reuse Full/Basic features; fit both CBMs afresh with the reduced concept bank.
+backbone_root: /data/pzhao3/ot2_output/ot2_f1_study_v1_20260922
+exclude_observation: true
+clinical_dir: /data/EMED/AIREADI/aireadi300/d55855bd-e2fb-4e53-a07f-e5fd3c41707a/dataset/clinical_data
+
+devices: [0, 1, 2, 3]
+seed: 42
+batch_size: 32
+num_workers: 2
+cpu_threads: 2
+max_epochs: 30
+patience: 7
+learning_rate: 0.00005
+weight_decay: 0.01
+
+concept_epochs: 400
+head_epochs: 300
+joint_epochs: 300
+concept_patience: 40
+cbm_learning_rate: 0.001
+cbm_weight_decay: 0.0001
+concept_lambda: 1.0
+concept_tolerance: 0.1
+
+# Also the number of paired prediction-swap permutations for each p value.
+bootstrap_samples: 10000
+tasks:
+  - moca_binary
+  - cvd_broad_binary
+  - cvd_strict_binary
+  - osteoporosis_history_binary
+  - kidney_history_binary
+  - lung_history_binary

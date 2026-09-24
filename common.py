@@ -41,3 +41,7 @@ def original_config(task,cfg):
 def concept_dir(task,cfg):
     root=cfg['concept_root'] if task in FULL_CONFIGS else cfg['history_concept_root']
     return Path(root)/task/'labels'
+
+def backbone_dir(task,cfg):
+    """Read frozen multimodal outputs from this run or an explicitly reused run."""
+    return Path(cfg.get("backbone_root") or cfg["output_root"])/task

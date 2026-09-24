@@ -144,3 +144,31 @@ output_root/
 | `data_preprocessing_cluster/` | Preserved preprocessing source; not invoked by the new runner |
 
 Only code/configuration belong in Git. Raw data, patient-level predictions, labels and checkpoints remain on the cluster. Old experiment implementations remain available in Git history (before this F1 refactor). See [PREPARATION.md](PREPARATION.md) for the retained optional input-preparation recipe.
+
+## CBM experiment without Observation concepts
+
+```bash
+python -u run.py --config study_no_observation.yaml --devices 0 1 2 3
+```
+
+This run excludes **all Observation-domain Concept IDs**, including the four surveys.
+It preserves the task-specific label exclusions. Remaining ID counts: MoCA 109,
+CVD broad 104, CVD strict 107, osteoporosis 111, kidney 111, lung 111.
+These are inventory counts; learnable targets depend on observed training labels.
+The domain refers to the concept dictionary, not which CSV stores a response:
+a retained Condition concept can have its recorded label in observation.csv.
+
+The configuration reads frozen Full/Basic features and ablation outputs from
+`/data/pzhao3/ot2_output/ot2_f1_study_v1_20260922` (`backbone_root`).
+It fits **new Basic and Mixed CBMs**, without rerunning multimodal training or
+preprocessing. Both val and test are analyzed. Results are separate under
+`/data/pzhao3/ot2_output/ot2_cbm_no_observation_v1_20260923`.
+Use the default `all` stage on the first run so labels and the new CBMs are built.
+
+In that output directory, `tables/CONCEPT_RESTORATION_ALL_test.csv` contains
+all individual Concept-ID restorations, ranked by test F1 recovery within each
+task/mode/removal. `tables/ALL_CONCEPTS_RESTORED_test.csv` contains simultaneous
+restoration of all remaining concept channels. Both include F1, BA and uncertainty.
+Test ranking is exploratory; thresholds and top-three modality removals remain
+validation-selected. Excluding a CBM target does not delete that field from the
+Full model's clinical inputs.

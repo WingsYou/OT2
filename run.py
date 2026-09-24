@@ -71,6 +71,10 @@ def main():
         if getattr(a,key) is not None:cfg[key]=getattr(a,key)
     for key in ('source_root','output_root','clinical_dir'):
         cfg[key]=str(Path(cfg[key]).expanduser().resolve())
+    if cfg.get('backbone_root'):
+        cfg['backbone_root']=str(Path(cfg['backbone_root']).expanduser().resolve())
+        if cfg['backbone_root']==cfg['output_root']:
+            raise ValueError('Choose a separate output-root for the new CBMs.')
     cfg['devices']=list(map(str,cfg['devices']))
     root=Path(cfg['output_root']);source=Path(cfg['source_root'])
     if root==source:raise ValueError('Use a new output directory for the F1 rerun; source_root is read-only.')
@@ -98,7 +102,7 @@ def main():
                 read_json(source/'inputs.json');read_json(source/'cache/dimensions.json')
                 if not (root/'labels/DONE.json').exists():
                     from cbm.labels import extract,FOUR_OBSERVATION_FORMS,SURVEY_ADMIN_IDS
-                    extract(cfg['clinical_dir'],root/'labels',observation_forms=FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS)
+                    extract(cfg['clinical_dir'],root/'labels',observation_forms=() if cfg.get('exclude_observation') else FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS)
                     write_json(root/'labels/DONE.json',dict(clinical_dir=cfg['clinical_dir']))
                 jobs=[(task+'_'+variant,['--task',task,'--variant',variant]) for task in cfg['tasks'] for variant in ('full','basic')]
                 pool(jobs,cfg['devices'],runtime,root)

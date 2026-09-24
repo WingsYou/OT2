@@ -63,6 +63,8 @@ def make_report(cfg):
                [[TASK_LABELS[x.task],x.n,x.positive,x.negative,f'{x.prevalence:.3f}',f'{x.all_positive_f1:.4f}'] for x in co.itertuples()]),
             'All-positive baseline BA is 0.5000 for every task. BA = (sensitivity + specificity) / 2.', '',
             '## 1. Downstream classification', '', 'Cells show F1 and BA, each with a 95% CI.', '']
+        if cfg.get('exclude_observation'):
+            lines[2:2] = ['Concept bank: all Observation-domain concepts excluded. Measurement, Condition, Procedure and Device concepts retain task-specific outcome exclusions. Full/Basic backbone features are reused; both CBMs are refitted.', '']
         def cell(task,model):
             row=c[(c.task==task)&(c.model==model)].iloc[0]
             return 'F1: '+interval(row)+'<br>BA: '+interval(row,prefix='ba_')

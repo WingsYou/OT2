@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from common import REMOVALS, read_json, write_json
+from common import REMOVALS, read_json, write_json, backbone_dir
 from train import load
 from stats import PairedF1, f1
 from cbm.model import restore, predict
@@ -12,6 +12,7 @@ from cbm.experiment import concept_id_groups, restoration_batch
 
 def run_analysis(task, cfg, device):
     root = Path(cfg['output_root'])/task
+    backbone = backbone_dir(task,cfg)
     out = root/'analysis'; out.mkdir(exist_ok=True)
     if (out/'DONE.json').exists() and read_json(out/'DONE.json').get('restoration_version') == 2:
         add_balanced_accuracy(task, cfg, device)
@@ -19,18 +20,18 @@ def run_analysis(task, cfg, device):
     artifacts = {mode:load(root/(mode+'_cbm')/'model.pt') for mode in ('basic','mixed')}
     models = {mode:restore(a, device) for mode,a in artifacts.items()}
     groups = {mode:concept_id_groups(a['spec']['items']) for mode,a in artifacts.items()}
-    cuts = {k:read_json(root/k/'TRAINING_DONE.json')['threshold'] for k in ('full','basic')}
+    cuts = {k:read_json(backbone/k/'TRAINING_DONE.json')['threshold'] for k in ('full','basic')}
     cuts.update({m+'_cbm':a['threshold'] for m,a in artifacts.items()})
     torch.set_float32_matmul_precision('highest')
     classification, comparisons, ablations, recoveries, cohorts = [], [], [], [], []
     selection = dict(metric='positive_class_f1', selection_split='val', top_modalities=[], concepts={})
     for split in ('val','test'):
-        basic = load(root/'basic'/f'features_{split}.pt'); full = load(root/'full'/f'features_{split}.pt')
+        basic = load(backbone/'basic'/f'features_{split}.pt'); full = load(backbone/'full'/f'features_{split}.pt')
         if basic['person_ids'] != full['person_ids'] or not torch.equal(basic['y'], full['y']):
             raise ValueError(f'{task}/{split}: Full and Basic predictions must use the same ordered participants')
         y = basic['y'].numpy(); n = len(y)
         boot = PairedF1(y, cfg['bootstrap_samples'], cfg['seed'], device)
-        removed = load(root/'basic'/f'removals_{split}.pt')
+        removed = load(backbone/'basic'/f'removals_{split}.pt')
         bz, bp = predict(models['basic'], basic['embedding'])
         fz, fp = predict(models['mixed'], full['embedding'])
         mz, mp = predict(models['mixed'], full['masked_embedding'])
