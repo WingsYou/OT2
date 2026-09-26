@@ -65,7 +65,7 @@ def main():
     p.add_argument('--config',type=Path,default=HERE/'study.yaml')
     p.add_argument('--devices',nargs='+');p.add_argument('--source-root',type=Path)
     p.add_argument('--output-root',type=Path)
-    p.add_argument('--stage',choices=('all','train','analyze','report'),default='all')
+    p.add_argument('--stage',choices=('all','train','analyze','report','concept-diagnostics'),default='all')
     a=p.parse_args();cfg=yaml.safe_load(a.config.read_text())
     for key in ('source_root','output_root','devices'):
         if getattr(a,key) is not None:cfg[key]=getattr(a,key)
@@ -82,6 +82,10 @@ def main():
     for key in ('OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'):os.environ[key]=str(cfg['cpu_threads'])
     from common import read_json,write_json
     from report import make_report
+    diagnostics = a.stage=='concept-diagnostics'
+    if diagnostics:
+        from cbm.diagnostics_report import make_diagnostics_report
+    reporter = make_diagnostics_report if diagnostics else make_report
     runtime=root/'runtime.yaml'
     if runtime.exists():
         previous=yaml.safe_load(runtime.read_text())
@@ -94,7 +98,8 @@ def main():
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise RuntimeError('A process is already using this output directory') from None
         runtime.write_text(yaml.safe_dump(cfg,sort_keys=False))
-        status=dict(status='running',stage=a.stage,tasks=cfg['tasks']);write_json(root/'STATUS.json',status)
+        status_path = root/('CONCEPT_DIAGNOSTICS_STATUS.json' if diagnostics else 'STATUS.json')
+        status=dict(status='running',stage=a.stage,tasks=cfg['tasks']);write_json(status_path,status)
         try:
             if a.stage in ('all','train'):
                 # These are existing normalized tensors and frozen ResNet features,
@@ -109,9 +114,13 @@ def main():
             if a.stage in ('all','analyze'):
                 jobs=[(task+'_analysis',['--task',task,'--analyze']) for task in cfg['tasks']]
                 pool(jobs,cfg['devices'],runtime,root,after=lambda:make_report(cfg))
-            status['status']='complete';write_json(root/'STATUS.json',status);make_report(cfg)
+            if diagnostics:
+                jobs=[(task+'_concept_diagnostics',['--task',task,'--concept-diagnostics']) for task in cfg['tasks']]
+                pool(jobs,cfg['devices'],runtime,root,after=lambda:reporter(cfg))
+            status['status']='complete';write_json(status_path,status);reporter(cfg)
         except BaseException as exc:
-            status.update(status='failed',error=str(exc));write_json(root/'STATUS.json',status);raise
-    print('F1_STUDY_COMPLETE: '+str(root/'tables'),flush=True)
+            status.update(status='failed',error=str(exc));write_json(status_path,status);raise
+    print(('CONCEPT_DIAGNOSTICS_COMPLETE: ' if diagnostics else 'F1_STUDY_COMPLETE: ')+
+          str(root/('tables/concept_diagnostics' if diagnostics else 'tables')),flush=True)
 
 if __name__=='__main__':main()

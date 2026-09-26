@@ -51,16 +51,19 @@ class PairedF1:
 
     Evaluation participants occur once in the input. Resampling here estimates
     uncertainty, and never changes the evaluated prevalence or trains a model.
-    Each swap exchanges the two decisions for one participant. It tests paired
+    Each swap exchanges two predictions for one participant (probabilities for
+    Brier, thresholded decisions for F1/BA). It tests paired
     prediction exchangeability conditional on the fitted models/thresholds.
     """
-    def __init__(self, y, samples=10000, seed=42, device='cpu'):
+    def __init__(self, y, samples=10000, seed=42, device='cpu', allow_single_class=False):
         self.y = np.asarray(y, int); self.device = device
         self.samples = samples; rng = np.random.default_rng(seed)
         weights = np.ones((samples + 1, len(y)), np.float64)
         for k in (0, 1):
             idx = np.flatnonzero(self.y == k)
-            if not len(idx): raise ValueError('Evaluation needs both outcome classes')
+            if not len(idx):
+                if allow_single_class: continue
+                raise ValueError('Evaluation needs both outcome classes')
             weights[1:, idx] = rng.multinomial(len(idx), np.full(len(idx), 1/len(idx)), samples)
         self.w = torch.as_tensor(weights, device=device)
         self.truth = torch.as_tensor(self.y, dtype=torch.float64, device=device)
@@ -78,12 +81,26 @@ class PairedF1:
         return 2*tp/(predicted+positive).clamp_min(1)
 
     def draws(self, p, cut, metric='f1'):
+        if metric == 'balanced_accuracy' and len(np.unique(self.y))<2:
+            return np.full((len(np.atleast_2d(p)),self.samples+1),np.nan)
+        if metric == 'brier':
+            p = torch.as_tensor(np.atleast_2d(p), dtype=torch.float64, device=self.device)
+            return ((p-self.truth).square() @ self.w.T / self.w.sum(1)).cpu().numpy()
         d = self.decisions(p, cut)
         tp = (d * self.truth) @ self.w.T
         predicted = d @ self.w.T
         return self.score(tp, predicted, self.positive, self.w.sum(1), metric).cpu().numpy()
 
     def pvalues(self, a, b, cut_a, cut_b, metric='f1'):
+        if metric == 'balanced_accuracy' and len(np.unique(self.y))<2:
+            return np.full(max(len(np.atleast_2d(a)),len(np.atleast_2d(b))),np.nan)
+        if metric == 'brier':
+            a = torch.as_tensor(np.atleast_2d(a), dtype=torch.float64, device=self.device)
+            b = torch.as_tensor(np.atleast_2d(b), dtype=torch.float64, device=self.device)
+            difference = (a-self.truth).square() - (b-self.truth).square()
+            observed = difference.mean(1, keepdim=True)
+            null = (difference.sum(1, keepdim=True)-2*difference @ self.swaps.T)/len(self.y)
+            return ((1+(null.abs() >= observed.abs()-1e-12).sum(1))/(self.samples+1)).cpu().numpy()
         a = self.decisions(a, cut_a); b = self.decisions(b, cut_b)
         a, b = torch.broadcast_tensors(a, b)
         # Swapping only changes predicted positives and true positives.

@@ -5,6 +5,76 @@ how much does removing each modality affect them; and which Mixed-CBM concept
 channels recover performance when nonbasic structured clinical inputs are missing?
 Raw preprocessing and the original train/validation/test split are unchanged.
 
+## Add Brier, concept-quality and measured-value analyses (no retraining)
+
+For the **two completed** Observation experiments, run:
+
+```bash
+cd ~/OT2
+git pull origin main
+conda activate ot2
+python -u run.py --config study_no_observation.yaml --stage concept-diagnostics --devices 0 1 2 3
+python -u run.py --config study_with_observation.yaml --stage concept-diagnostics --devices 0 1 2 3
+```
+
+Run the commands sequentially; each uses the four GPUs for six task workers.
+This stage reads existing Full-model feature caches, Mixed-CBM checkpoints and
+already-extracted concept labels. It does not fit models, extract raw data, change
+the concept bank, recompute image features, or select thresholds. No new package
+is required. If paths/settings differ, use each completed run's `runtime.yaml`
+instead of the repository config. Completed task diagnostics are reused on restart.
+
+Results are separate from the original reports, under **each** experiment's
+`tables/concept_diagnostics/`:
+
+- `SUMMARY_CONCEPT_DIAGNOSTICS_val.md` and `SUMMARY_CONCEPT_DIAGNOSTICS_test.md`:
+  English summaries to share with coauthors.
+- `DOWNSTREAM_BRIER_{split}.csv` and `INPUT_REMOVAL_BRIER_{split}.csv`: original
+  Full model and Mixed CBM, each with full/masked inputs; Brier, F1, BA and paired
+  input-removal effects. Lower Brier is better.
+- `CONCEPT_QUALITY_{split}.csv`: every checkpoint concept item, retaining source,
+  qualifier and unit. Continuous quality includes raw-unit MAE/RMSE and training-
+  standardized MSE; categorical quality includes accuracy, macro recall, log loss
+  and multiclass Brier. Training-mean/category-frequency baselines and label
+  coverage distinguish weak prediction from a small full/masked difference.
+- `PREDICTED_RESTORATION_BRIER_{split}.csv`: all single-ID full-input-prediction
+  restorations, with Brier gains added alongside the existing F1/BA outcomes.
+- `MEASURED_CONCEPT_SUPPLEMENTATION_{split}.csv`: all single-ID measured-target
+  interventions, both over the whole cohort and over participants with at least
+  one usable label for that ID. Includes coverage, complete-ID coverage,
+  confusion counts, corrected/newly-wrong counts, paired CIs, p/q values, and
+  validation/within-split Brier ranks.
+
+**Measured targets use the original saved encoding.** Continuous labels are
+normalized by the checkpoint's training mean/SD; categorical labels are mapped
+to its category order and supplied as one-hot probabilities. Same-ID items move
+together, but only observed/encodable/learnable items are changed. Missing labels,
+unknown categories and constant/untrained channels stay predicted. Repeated
+measurements keep their separate source/unit channels. Labels are never refitted
+on validation/test; absent occurrence records are never invented as negatives.
+“Measured” includes recorded questionnaire responses, not only numeric laboratory
+measurements. Performance may worsen when a predicted-concept classifier receives
+measured values; this experiment explicitly evaluates that possibility.
+
+Positive Brier gain means `masked Brier − supplemented Brier`; positive F1/BA
+gain means `supplemented − masked`. F1/BA and all interventions use the saved
+Mixed-CBM masked-validation threshold. Brier is an **additional exploratory**
+probability metric, not a replacement for the original outcomes. Displayed
+candidates use validation Brier rank ≤10 with ties included; all IDs and test
+ranks remain in CSV. Previously inspected test data are not a fresh confirmatory
+cohort. Observed-label subsets differ by ID; report their sample sizes rather
+than comparing their effects as if they had identical populations. Single-class
+subsets have undefined BA (reported as NA). Bootstrap/permutation calculations
+batch concept IDs on GPU; observed cohorts sharing availability are evaluated
+together. The original summary, model checkpoints and analysis completion flags
+are not replaced. All-concept **predicted** restoration remains the full-input
+CBM endpoint by construction; this extension adds only individual measured-ID
+interventions, not joint measured supplementation.
+
+Per-task results and participant-level measured probabilities/availability are
+under `TASK/concept_diagnostics/`. Run status is in
+`CONCEPT_DIAGNOSTICS_STATUS.json`; progress logs end in `_concept_diagnostics.log`.
+
 ## Run the Observation comparison in a separate folder
 
 ```bash
