@@ -127,7 +127,12 @@ class ConceptDiagnosticsTests(unittest.TestCase):
                     self.assertEqual(q[q.concept_id=='102'].iloc[0].n_unseen_category,1)
                 text=(table/'SUMMARY_CONCEPT_DIAGNOSTICS_test.md').read_text()
                 self.assertIn('without Observation' if excluded else 'with the four approved Observation surveys',text)
-                self.assertIn('validation Brier rank',text)
+                self.assertIn('Test Brier rank',text)
+                self.assertIn('ranked directly on test',text)
+                self.assertNotIn('validation_brier_rank',frame.columns)
+                for _, group in frame.groupby('population'):
+                    ranks=group.brier_rank_within_split.dropna()
+                    self.assertTrue(ranks.is_monotonic_increasing)
                 with patch('cbm.diagnostics.load',side_effect=AssertionError('must reuse')):
                     run_diagnostics(task,cfg,torch.device('cpu'))
 

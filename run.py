@@ -65,7 +65,7 @@ def main():
     p.add_argument('--config',type=Path,default=HERE/'study.yaml')
     p.add_argument('--devices',nargs='+');p.add_argument('--source-root',type=Path)
     p.add_argument('--output-root',type=Path)
-    p.add_argument('--stage',choices=('all','train','analyze','report','concept-diagnostics'),default='all')
+    p.add_argument('--stage',choices=('all','train','analyze','report','concept-diagnostics','concept-diagnostics-report'),default='all')
     a=p.parse_args();cfg=yaml.safe_load(a.config.read_text())
     for key in ('source_root','output_root','devices'):
         if getattr(a,key) is not None:cfg[key]=getattr(a,key)
@@ -82,7 +82,7 @@ def main():
     for key in ('OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'):os.environ[key]=str(cfg['cpu_threads'])
     from common import read_json,write_json
     from report import make_report
-    diagnostics = a.stage=='concept-diagnostics'
+    diagnostics = a.stage in ('concept-diagnostics','concept-diagnostics-report')
     if diagnostics:
         from cbm.diagnostics_report import make_diagnostics_report
     reporter = make_diagnostics_report if diagnostics else make_report
@@ -93,7 +93,7 @@ def main():
         resources=('devices','num_workers','cpu_threads')
         if {k:v for k,v in previous.items() if k not in resources}!={k:v for k,v in cfg.items() if k not in resources}:
             raise ValueError('Settings differ from this output. Use its runtime.yaml or choose a new output-root.')
-    if a.stage=='report':make_report(cfg);return
+    if a.stage in ('report','concept-diagnostics-report'):reporter(cfg);return
     with (root/'.run.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise RuntimeError('A process is already using this output directory') from None

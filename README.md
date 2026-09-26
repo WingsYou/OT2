@@ -24,6 +24,18 @@ the concept bank, recompute image features, or select thresholds. No new package
 is required. If paths/settings differ, use each completed run's `runtime.yaml`
 instead of the repository config. Completed task diagnostics are reused on restart.
 
+To regenerate completed diagnostic Markdown and CSV files using **test Brier
+ranking** for test results (validation results use their own validation ranking):
+
+```bash
+python -u run.py --config /data/pzhao3/ot2_output/ot2_cbm_no_observation_v1_20260923/runtime.yaml --stage concept-diagnostics-report
+python -u run.py --config /data/pzhao3/ot2_output/ot2_cbm_with_observation_v1_20260926/runtime.yaml --stage concept-diagnostics-report
+```
+
+This report-only stage reads saved per-task diagnostic CSVs. It does not load
+checkpoints, run inference, resample bootstrap draws, or use a GPU. It replaces
+the diagnostic summaries/aggregate CSVs in the existing output folders.
+
 Results are separate from the original reports, under **each** experiment's
 `tables/concept_diagnostics/`:
 
@@ -43,7 +55,8 @@ Results are separate from the original reports, under **each** experiment's
   interventions, both over the whole cohort and over participants with at least
   one usable label for that ID. Includes coverage, complete-ID coverage,
   confusion counts, corrected/newly-wrong counts, paired CIs, p/q values, and
-  validation/within-split Brier ranks.
+  within-split Brier ranks. Both restoration CSVs are sorted within each task
+  and population by descending Brier gain; unevaluable IDs appear last.
 
 **Measured targets use the original saved encoding.** Continuous labels are
 normalized by the checkpoint's training mean/SD; categorical labels are mapped
@@ -60,9 +73,11 @@ Positive Brier gain means `masked Brier − supplemented Brier`; positive F1/BA
 gain means `supplemented − masked`. F1/BA and all interventions use the saved
 Mixed-CBM masked-validation threshold. Brier is an **additional exploratory**
 probability metric, not a replacement for the original outcomes. Displayed
-candidates use validation Brier rank ≤10 with ties included; all IDs and test
-ranks remain in CSV. Previously inspected test data are not a fresh confirmatory
-cohort. Observed-label subsets differ by ID; report their sample sizes rather
+candidates use the displayed split's Brier rank ≤10 with ties included: **test
+reports rank directly on test**, without validation-based selection. The test
+header is `Test Brier rank`; CSVs use `brier_rank_within_split` and retain every ID.
+Test ranks are exploratory, and intervals do not adjust for selecting the largest
+test effects. Observed-label subsets differ by ID; report their sample sizes rather
 than comparing their effects as if they had identical populations. Single-class
 subsets have undefined BA (reported as NA). Bootstrap/permutation calculations
 batch concept IDs on GPU; observed cohorts sharing availability are evaluated

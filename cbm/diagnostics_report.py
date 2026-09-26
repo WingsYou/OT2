@@ -37,10 +37,7 @@ def make_diagnostics_report(cfg):
     eligible = r.learnable & (r.status=='evaluated') & r.brier_gain.notna()
     r['brier_rank_within_split'] = np.nan
     r.loc[eligible,'brier_rank_within_split'] = r[eligible].groupby(['task','split','source','population']).brier_gain.rank(method='min',ascending=False)
-    keys = ['task','source','population','concept_id']
-    validation = r[r.split=='val'][keys+['brier_rank_within_split']].rename(columns={'brier_rank_within_split':'validation_brier_rank'})
-    r = r.merge(validation,on=keys,how='left',validate='many_to_one')
-    frames['restoration'] = r
+    frames['restoration'] = r.sort_values(['task','split','source','population','brier_rank_within_split','concept_id'],na_position='last')
     for split in ('val','test'):
         q,p,c,s = [frames[name].query('split == @split') for name in ('quality','performance','comparisons','restoration')]
         bank = 'without Observation' if cfg.get('exclude_observation') else 'with the four approved Observation surveys'
@@ -97,26 +94,28 @@ def make_diagnostics_report(cfg):
                   'Brier gain = baseline Brier − supplemented Brier; F1/BA gain = supplemented − baseline. '
                   'Positive values are improvements. Brier ordering is a new exploratory probability analysis, not a replacement '
                   'for the original F1/BA results or proof of improved classification accuracy. '
-                  'Tables show validation Brier rank ≤10 (including ties at the boundary), with the same IDs shown on test. '
-                  'A top-ranked effect may be zero or negative. The CSV contains every ID and within-split ranks. '
-                  'Previously inspected test data are not a fresh confirmatory set.', '']
+                  f'Tables show {split} Brier rank ≤10 (including ties at the boundary), ranked directly on {split}. '
+                  'Test candidates are not selected using validation ranks. A top-ranked effect may be zero or negative. '
+                  'The CSV contains every ID, sorted by within-split Brier rank within each task, source and population; '
+                  'unevaluable IDs have no rank and appear last. Test rankings are exploratory, '
+                  'and their intervals do not account for selecting the largest test effects.', '']
         for source,title in [('full_input_prediction','Full-input predicted concept restoration'),('measured','Measured concept supplementation')]:
             lines += [f'### {title} — all participants', '']
             for task in tasks:
-                z=s[(s.task==task)&(s.source==source)&(s.population=='all_participants')&(s.validation_brier_rank<=10)]
+                z=s[(s.task==task)&(s.source==source)&(s.population=='all_participants')&(s.brier_rank_within_split<=10)]
                 if source=='measured':z=z[z.n_eligible>0]
-                z=z.sort_values(['validation_brier_rank','concept_id'])
+                z=z.sort_values(['brier_rank_within_split','concept_id'])
                 lines += [f'#### {TASK_LABELS[task]}', '']
                 if z.empty:
-                    lines += ['No evaluable validation-ranked candidates.', ''];continue
-                lines += [md(['Val rank','Concept ID','Concept','Source fields','Eligible N / total',
+                    lines += [f'No evaluable {split}-ranked candidates.', ''];continue
+                lines += [md([split.title()+' Brier rank','Concept ID','Concept','Source fields','Eligible N / total',
                               'ΔBrier [95% CI]','Brier q','ΔF1 [95% CI]','ΔBA [95% CI]','Corrected / newly wrong'],
-                    [[int(x.validation_brier_rank),x.concept_id,x.concept_name,x.source_fields,f'{x.n_eligible}/{x.n_total}',
+                    [[int(x.brier_rank_within_split),x.concept_id,x.concept_name,x.source_fields,f'{x.n_eligible}/{x.n_total}',
                       ci(x._asdict(),'brier_gain',True),number(x.brier_q_value),ci(x._asdict(),'f1_gain',True),
                       ci(x._asdict(),'ba_gain',True),f'{int(x.corrected)}/{int(x.newly_wrong)}'] for x in z.itertuples()])]
                 if source=='measured':
-                    obs=s[(s.task==task)&(s.source==source)&(s.population=='observed_participants')&s.concept_id.isin(z.concept_id)].sort_values(['validation_brier_rank','concept_id'])
-                    lines += ['The same candidates, evaluated only among participants with usable measured labels:', '',
+                    obs=s[(s.task==task)&(s.source==source)&(s.population=='observed_participants')&s.concept_id.isin(z.concept_id)].sort_values(['brier_rank_within_split','concept_id'])
+                    lines += [f'The same candidates, evaluated only among participants with usable measured labels, sorted by their {split} Brier gain in that subset:', '',
                               md(['Concept ID','Observed N','Positive / negative','ΔBrier [95% CI]','ΔF1 [95% CI]','ΔBA [95% CI]'],
                                  [[x.concept_id,x.n,f'{x.positive}/{x.negative}',ci(x._asdict(),'brier_gain',True),
                                    ci(x._asdict(),'f1_gain',True),ci(x._asdict(),'ba_gain',True)] for x in obs.itertuples()])]
