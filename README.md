@@ -5,6 +5,60 @@ how much does removing each modality affect them; and which Mixed-CBM concept
 channels recover performance when nonbasic structured clinical inputs are missing?
 Raw preprocessing and the original train/validation/test split are unchanged.
 
+## Run the Observation comparison in a separate folder
+
+```bash
+cd ~/OT2
+git pull origin main
+conda activate ot2
+python -u run.py --config study_with_observation.yaml --devices 0 1 2 3
+```
+
+Use the default `all` stage for this new run: it extracts the concept supervision,
+fits new Basic/Mixed CBMs, then produces all current val/test tables. It reuses
+the same frozen Full/Basic models and features as the no-Observation experiment;
+neither the multimodal models nor raw preprocessing are rerun. Training settings,
+seed 42, F1/BA reporting and 10,000 bootstrap draws are unchanged.
+
+Only Observation targets from these four forms are added back:
+
+- `px_food_insecurity_survey`
+- `px_neighborhood_environment_survey`
+- `px_racial_ethnic_discrimination_survey`
+- `px_sdoh_combined_survey`
+
+Each task retains its own outcome exclusions. Measurement, Device, Condition and
+Procedure concepts keep their previous task-specific eligibility. The form
+restriction applies only to **Observation**: eligible Condition concepts from
+`health_survey`, for example, remain available. Survey administration IDs remain
+excluded: `4160030` (performed/survey dates), `2005200102` (metadata), `2005200558`
+(start timestamps) and `2005200559` (completion timestamps). Substantive survey
+questions about frequency or the past 12 months are retained; they are not
+administrative timestamps.
+
+| Task | Without Observation | With the four surveys |
+|---|---:|---:|
+| MoCA | 109 | 222 |
+| CVD broad | 104 | 217 |
+| CVD strict | 107 | 220 |
+| Osteoporosis | 111 | 224 |
+| Kidney problems | 111 | 224 |
+| Lung problems | 111 | 224 |
+
+These are inventory Concept-ID counts, not the number of learnable channels.
+The clean four-survey inventory is the same one used before removing Observation;
+this run uses the latest report structure, with Mixed-only concept restoration.
+
+The two output locations are independent:
+
+- With Observation: `/data/pzhao3/ot2_output/ot2_cbm_with_observation_v1_20260926/tables/`
+- Without Observation: `/data/pzhao3/ot2_output/ot2_cbm_no_observation_v1_20260923/tables/`
+
+Both produce Full/Basic modality ablations, retained Basic-CBM classification,
+Mixed full/masked/all-concepts-restored performance, and Mixed single-ID Top10
+plus complete CSV results. Neither runs Basic-CBM task-specific Top3 restoration.
+Rerun the same command after interruption; completed stages are reused.
+
 ## Update the completed no-Observation experiment
 
 ```bash

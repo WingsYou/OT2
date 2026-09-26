@@ -69,6 +69,13 @@ def make_report(cfg):
             'BA uses the same frozen threshold. Validation and test retain their natural class proportions; only training uses balanced oversampling.', '']
         if cfg.get('exclude_observation'):
             lines += ['Concept bank: all Observation-domain concepts excluded. Measurement, Condition, Procedure and Device concepts retain task-specific outcome exclusions.', '']
+        else:
+            lines += ['Concept bank: Observation is restricted to the food insecurity, neighborhood environment, '
+                'racial/ethnic discrimination and combined SDOH surveys. Each task retains its own outcome exclusions. '
+                'Measurement, Device, Condition and Procedure concepts keep their previous task-specific eligibility. '
+                'The form restriction applies only to Observation: eligible Condition concepts from health_survey remain available. '
+                'Survey-date/performed, metadata, start-timestamp and completion-timestamp IDs '
+                '4160030, 2005200102, 2005200558 and 2005200559 are excluded.', '']
         lines += ['## Evaluation cohorts', '',
             md(['Task','N','Positive','Negative','Prevalence','All-positive baseline F1 (no model)'],
                [[TASK_LABELS[x.task],x.n,x.positive,x.negative,f'{x.prevalence:.3f}',f'{x.all_positive_f1:.4f}'] for x in co.itertuples()]),

@@ -80,6 +80,20 @@ class F1StudyTests(unittest.TestCase):
         self.assertFalse(any(c['domain']=='Observation' for c in reduced['concepts'].values()))
         self.assertEqual([p['inventory_ids'] for p in reduced['tasks'].values()],
                          [n-113 for n in (222,217,220,224,224,224)])
+        for task, policy in bank['tasks'].items():
+            nonobs={k for k in policy['concept_keys'] if bank['concepts'][k]['domain']!='Observation'}
+            self.assertEqual(nonobs,set(reduced['tasks'][task]['concept_keys']))
+            self.assertTrue(any(bank['concepts'][k]['domain']=='Condition' and
+                                bank['concepts'][k]['form_name']=='health_survey' for k in nonobs))
+            for key in policy:
+                if key.startswith('excluded_'):self.assertEqual(policy[key],reduced['tasks'][task][key])
+        self.assertFalse(any(c['source_field'].endswith(('_metadata','cmpdat','startts','cmpts')) for c in obs))
+        with_obs=yaml.safe_load(Path('study_with_observation.yaml').read_text())
+        without_obs=yaml.safe_load(Path('study_no_observation.yaml').read_text())
+        differences={k for k in set(with_obs)|set(without_obs) if with_obs.get(k)!=without_obs.get(k)}
+        self.assertEqual(differences,{'output_root','exclude_observation'})
+        self.assertFalse(with_obs['exclude_observation'])
+
 
 
     def test_small_end_to_end_both_backbones_and_cbms(self):
@@ -176,6 +190,8 @@ class F1StudyTests(unittest.TestCase):
             text=(out/'tables/SUMMARY_test.md').read_text()
             self.assertIn('All clinical information',text);self.assertIn('Basic-only inputs + all concepts restored',text)
             self.assertNotIn('### Basic CBM: top-three',text)
+            self.assertIn('The form restriction applies only to Observation',text)
+            self.assertIn('2005200559',text)
             exported=pd.read_csv(out/'tables/CONCEPT_RESTORATION_ALL_test.csv',dtype={'concept_id':str})
             self.assertEqual(len(exported),12)
             self.assertEqual(len(pd.read_csv(out/'tables/ALL_CONCEPTS_RESTORED_test.csv')),1)
