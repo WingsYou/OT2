@@ -10,13 +10,13 @@ import yaml
 from sklearn.metrics import f1_score, balanced_accuracy_score
 from common import MODALITIES, REMOVALS, read_json, write_json, save_torch
 from stats import balanced_indices, f1, threshold, PairedF1, bh_adjust
-from train import run_model, load
+from train import run_model, load, FrozenFusionReadout
 from data import SOURCE_FLAG_BY_GROUP
 from task2_v2_model import Task2V2ModelConfig
 from cbm.labels import load_bank, FOUR_OBSERVATION_FORMS, SURVEY_ADMIN_IDS
 from cbm.experiment import run_cbm, concept_id_groups, restoration_batch
 from cbm.model import restore, predict
-from analysis import run_analysis
+from analysis import run_analysis, restoration_details, ANALYSIS_VERSION
 from report import make_report
 
 
@@ -53,6 +53,18 @@ class F1StudyTests(unittest.TestCase):
               for s in boot.swaps.cpu().numpy().astype(bool)]
         expected=(1+sum(abs(v)>=abs(observed)-1e-12 for v in null))/501
         self.assertAlmostEqual(boot.effects(p,other,cut,cut,metric='balanced_accuracy')[0]['p_value'],expected)
+
+    def test_restoration_ties(self):
+        y=np.array([1,0,1,0]);masked=np.array([.6,.4,.4,.6],dtype=np.float32)
+        ps=np.array([[.7,.3,.45,.55],[.8,.2,.49,.51],[.7,.3,.45,.55],[.6,.6,.4,.4]],dtype=np.float32)
+        d=restoration_details(y,ps,masked,.5,[True]*4)
+        self.assertEqual([x['rank'] for x in d],[1]*4)
+        self.assertEqual([x['tied_concepts'] for x in d],[4]*4)
+        self.assertEqual(d[0]['decision_group'],d[1]['decision_group'])
+        self.assertNotEqual(d[0]['probability_group'],d[1]['probability_group'])
+        self.assertEqual(d[0]['probability_group'],d[2]['probability_group'])
+        self.assertNotEqual(d[0]['decision_group'],d[3]['decision_group'])
+        self.assertEqual([x['n_prediction_changes'] for x in d],[0,0,0,2])
 
     def test_approved_inventory(self):
         bank=load_bank(observation_forms=FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS)
@@ -123,58 +135,68 @@ class F1StudyTests(unittest.TestCase):
             cache=load(out/task/'basic/features_val.pt')
             removed=load(out/task/'basic/removals_val.pt')
             np.testing.assert_allclose(removed['environment']['probability'][-1],cache['original_logits'].sigmoid().numpy()[-1],atol=1e-7)
-            run_analysis(task,cfg,torch.device('cpu'));make_report(cfg)
-            # A completed F1-only run upgrades from CSVs without loading models.
-            analysis=out/task/'analysis'; selected_before=(analysis/'SELECTION.json').read_bytes()
-            original={}
-            for name in ('classification','comparisons','ablation','restoration'):
-                df=pd.read_csv(analysis/(name+'.csv'),dtype={'concept_id':str},float_precision='round_trip')
-                original[name]=df
-                cols=[c for c in df if not c.startswith('ba_') and c not in ('full_ba','removed_ba','masked_ba','restored_ba','restored_ba_ci_lower','restored_ba_ci_upper')]
-                df[cols].to_csv(analysis/(name+'.csv'),index=False)
-            done=read_json(analysis/'DONE.json');done.pop('reported_metrics');write_json(analysis/'DONE.json',done)
-            with patch('analysis.restore',side_effect=AssertionError('must not load CBM')):
+            # Simulate upgrading the old run: Full ablations were never exported.
+            expected_full={split:load(out/task/'full'/f'removals_{split}.pt') for split in ('val','test')}
+            for split in ('val','test'):(out/task/'full'/f'removals_{split}.pt').unlink()
+            write_json(out/task/'analysis/DONE.json',dict(restoration_version=2,reported_metrics=['f1','balanced_accuracy']))
+            with patch('train.CachedDataset',side_effect=AssertionError('must not read raw tensors')):
                 run_analysis(task,cfg,torch.device('cpu'))
-            self.assertEqual(selected_before,(analysis/'SELECTION.json').read_bytes())
-            for name,before in original.items():
-                after=pd.read_csv(analysis/(name+'.csv'),dtype={'concept_id':str},float_precision='round_trip')
-                pd.testing.assert_frame_equal(before,after,check_exact=False,atol=1e-12,rtol=1e-12)
-            self.assertIn('BA recovery [95% CI]',(out/'tables/SUMMARY_test.md').read_text())
-            selection=read_json(out/task/'analysis/SELECTION.json')
-            self.assertEqual(len(selection['top_modalities']),3)
-            self.assertEqual(len(selection['concepts']),4)
-            r=pd.read_csv(out/task/'analysis/restoration.csv',dtype={'concept_id':str})
-            for key,ids in selection['concepts'].items():
-                self.assertEqual(len(ids),10)
-                mode,source_name=key.split('__',1)
-                test=r[(r.split=='test')&(r['mode']==mode)&(r.removed_input==source_name)]
-                self.assertEqual(set(test.concept_id),{c['concept_id'] for c in schema['concepts']}|{'ALL_CONCEPTS'})
-                ranked=test[test.intervention=='individual'].sort_values('rank')
-                self.assertTrue(np.all(np.diff(ranked.value.to_numpy())<=1e-12))
-                joint=test[test.intervention=='all_concepts'].iloc[0]
-                self.assertAlmostEqual(joint.restored_f1,joint.full_f1)
-                self.assertAlmostEqual(joint.restored_ba,joint.full_ba)
-            a=pd.read_csv(out/task/'analysis/ablation.csv')
-            self.assertEqual(set(a.removed_input),set(REMOVALS));self.assertEqual(len(a),22)
-            self.assertTrue((out/'tables/SUMMARY_test.md').exists())
+            make_report(cfg)
+            analysis=out/task/'analysis'
+            for split in ('val','test'):
+                actual=load(analysis/f'removals_full_{split}.pt')
+                for source_name in REMOVALS:
+                    np.testing.assert_allclose(actual[source_name]['probability'],expected_full[split][source_name]['probability'],atol=1e-7)
+            self.assertEqual(read_json(analysis/'DONE.json')['analysis_version'],ANALYSIS_VERSION)
+            with patch('analysis.restore',side_effect=AssertionError('completed analysis must reuse')):
+                run_analysis(task,cfg,torch.device('cpu'))
+            selection=read_json(analysis/'SELECTION.json')
+            self.assertEqual(set(selection['top_modalities']),{'full','basic'})
+            self.assertTrue(all(len(v)==3 for v in selection['top_modalities'].values()))
+            r=pd.read_csv(analysis/'restoration.csv',dtype={'concept_id':str})
+            self.assertEqual(set(r['mode']),{'mixed'})
+            self.assertEqual(set(r.removed_input),{'nonbasic_clinical'})
+            test=r[r.split=='test']
+            self.assertEqual(set(test.concept_id),{c['concept_id'] for c in schema['concepts']}|{'ALL_CONCEPTS'})
+            ranked=test[test.intervention=='individual'].sort_values('rank')
+            self.assertTrue(np.all(np.diff(ranked.value.to_numpy())<=1e-12))
+            joint=test[test.intervention=='all_concepts'].iloc[0]
+            self.assertAlmostEqual(joint.restored_f1,joint.full_f1)
+            self.assertAlmostEqual(joint.restored_ba,joint.full_ba)
+            a=pd.read_csv(analysis/'ablation.csv')
+            self.assertEqual(set(a.removed_input),set(REMOVALS));self.assertEqual(len(a),44)
+            self.assertEqual(set(a.model),{'full','basic'})
+            for x in a.itertuples():
+                cache=load(out/task/x.model/f'features_{x.split}.pt');labels=cache['y'].numpy()
+                removed=(expected_full[x.split] if x.model=='full' else load(out/task/x.model/f'removals_{x.split}.pt'))[x.removed_input]['probability']
+                expected=f1_score(labels,cache['original_logits'].sigmoid().numpy()>=x.threshold)-f1_score(labels,removed>=x.threshold)
+                self.assertAlmostEqual(x.value,expected)
+                expected=balanced_accuracy_score(labels,cache['original_logits'].sigmoid().numpy()>=x.threshold)-balanced_accuracy_score(labels,removed>=x.threshold)
+                self.assertAlmostEqual(x.ba_value,expected)
+            text=(out/'tables/SUMMARY_test.md').read_text()
+            self.assertIn('All clinical information',text);self.assertIn('Basic-only inputs + all concepts restored',text)
+            self.assertNotIn('### Basic CBM: top-three',text)
             exported=pd.read_csv(out/'tables/CONCEPT_RESTORATION_ALL_test.csv',dtype={'concept_id':str})
-            self.assertEqual(len(exported),4*12)
-            self.assertEqual(len(pd.read_csv(out/'tables/ALL_CONCEPTS_RESTORED_test.csv')),4)
-            # An older completed analysis must not suppress the expanded test sweep.
-            done=read_json(analysis/'DONE.json');done.pop('restoration_version');write_json(analysis/'DONE.json',done)
-            run_analysis(task,cfg,torch.device('cpu'))
-            self.assertEqual(read_json(analysis/'DONE.json')['restoration_version'],2)
-            # A separate CBM experiment reads frozen backbone outputs without copying them.
+            self.assertEqual(len(exported),12)
+            self.assertEqual(len(pd.read_csv(out/'tables/ALL_CONCEPTS_RESTORED_test.csv')),1)
+            performance=pd.read_csv(out/'tables/MIXED_CBM_PERFORMANCE_test.csv')
+            self.assertEqual(set(performance.model),{'mixed_full','mixed_basic','mixed_all_restored'})
+            for metric in ('value','ba_value'):
+                self.assertAlmostEqual(performance.loc[performance.model=='mixed_all_restored',metric].iloc[0],performance.loc[performance.model=='mixed_full',metric].iloc[0])
+            # Compare diagnostics with the saved patient probabilities.
+            saved=pd.read_csv(analysis/'restoration_mixed__nonbasic_clinical_test.csv',float_precision='round_trip')
+            for row in exported.itertuples():
+                prob=saved[row.concept_id].to_numpy(np.float32);masked=saved.masked_probability.to_numpy(np.float32)
+                self.assertEqual(row.n_prediction_changes,int(np.count_nonzero((prob>=row.threshold)!=(masked>=row.threshold))))
+                self.assertAlmostEqual(row.mean_abs_probability_change,float(np.abs(prob-masked).mean()))
+            # Separate output directory reads old backbones; no model retraining.
             import shutil
             reused=root/'reused'; (reused/task).mkdir(parents=True)
-            for variant in ('full','basic'):
-                shutil.move(str(out/task/variant),str(reused/task/variant))
+            for variant in ('full','basic'):shutil.move(str(out/task/variant),str(reused/task/variant))
             cfg['backbone_root']=str(reused)
-            for mode in ('basic','mixed'):
-                (out/task/(mode+'_cbm')/'DONE.json').unlink()
-                run_cbm(task,mode,cfg,torch.device('cpu'))
             (analysis/'DONE.json').unlink()
-            run_analysis(task,cfg,torch.device('cpu'))
+            with patch('analysis.cached_removals',wraps=__import__('train').cached_removals):
+                run_analysis(task,cfg,torch.device('cpu'))
             cfg['exclude_observation']=True; make_report(cfg)
             self.assertIn('all Observation-domain concepts excluded',(out/'tables/SUMMARY_test.md').read_text())
             artifact=load(out/task/'mixed_cbm/model.pt');model=restore(artifact,'cpu')

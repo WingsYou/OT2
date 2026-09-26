@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from common import MODALITIES, REMOVALS, read_json, write_json, save_torch
 from data import CachedDataset, clinical_inputs, collate, cache_config
 from stats import BalancedSampler, f1, threshold
-from task2_v2_model import Task2V2Model
+from task2_v2_model import Task2V2Model, Task2V2ModelConfig, PresenceAwareFusion, BinaryTaskHead
 
 
 class CachedModel(Task2V2Model):
@@ -151,6 +151,49 @@ def source_outputs(model, cache, task, device, batch_size):
     return results
 
 
+class FrozenFusionReadout(torch.nn.Module):
+    """Load only the trained fusion/head for ablation of cached source tokens."""
+    def __init__(self, checkpoint, task):
+        super().__init__()
+        config = Task2V2ModelConfig(**checkpoint['model_config'])
+        self.fusion = PresenceAwareFusion(config)
+        self.head = BinaryTaskHead(config.d_model, config.dropout)
+        state = checkpoint['model']
+        for prefix, module in (('fusion.', self.fusion), ('heads.'+task+'.', self.head)):
+            module.load_state_dict({k[len(prefix):]: v for k, v in state.items() if k.startswith(prefix)})
+
+    def predict_from_source_tokens(self, tokens, present, task):
+        embedding, _ = self.fusion(tokens, present)
+        return dict(embedding=embedding, logits=self.head(embedding))
+
+
+def cached_removals(task, variant, cfg, device, output):
+    """Reuse existing ablations or compute missing ones without touching the source run."""
+    from common import backbone_dir
+    root = backbone_dir(task, cfg)/variant
+    model = None
+    results = {}
+    for split in ('val', 'test'):
+        original = root/f'removals_{split}.pt'
+        path = output/f'removals_{variant}_{split}.pt'
+        if original.exists():
+            results[split] = load(original)
+        elif path.exists():
+            results[split] = load(path)
+        else:
+            if model is None:
+                model = FrozenFusionReadout(load(root/'best.pt'), task).to(device).eval()
+            cache = load(root/f'features_{split}.pt')
+            # Preserve the original export batch shape for BF16 inference.
+            import yaml
+            runtime = root.parent.parent/'runtime.yaml'
+            batch_size = yaml.safe_load(runtime.read_text())['batch_size'] if runtime.exists() else cfg['batch_size']
+            results[split] = source_outputs(model, cache, task, device, batch_size)
+            save_torch(path, results[split])
+            print(f'[ablation {task}/{variant}/{split}] {len(REMOVALS)} removals from cached source tokens', flush=True)
+    return results
+
+
 def run_model(task, variant, cfg, device):
     root = Path(cfg['output_root'])/task/variant; root.mkdir(parents=True, exist_ok=True)
     if (root/'DONE.json').exists(): print(f'[reuse] {task}/{variant}', flush=True); return
@@ -174,7 +217,7 @@ def run_model(task, variant, cfg, device):
     for split in ('train','val','test'):
         cache = export(model, loader(datasets[split], cfg), task, split, device, root,
                        basic_indices=basic if variant=='full' else None)
-        if variant=='basic' and split!='train':
+        if split!='train':
             path=root/f'removals_{split}.pt'
             if not path.exists(): save_torch(path, source_outputs(model, cache, task, device, cfg['batch_size']))
     write_json(root/'DONE.json', dict(task=task, variant=variant))
