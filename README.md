@@ -5,6 +5,94 @@ how much does removing each modality affect them; and which Mixed-CBM concept
 channels recover performance when nonbasic structured clinical inputs are missing?
 Raw preprocessing and the original train/validation/test split are unchanged.
 
+## Replacement cardiovascular tasks and AUROC concept selection
+
+Run only the two replacement tasks, with the same training pipeline:
+
+```bash
+cd ~/OT2
+git pull origin main
+conda activate ot2
+python -u run.py --config study_cardiovascular.yaml --devices 0 1 2 3
+python -u run.py --config study_cardiovascular_with_observation.yaml --devices 0 1 2 3
+```
+
+Run these commands in order. The first trains new Full/Basic backbones and
+Basic/Mixed CBMs without Observation. The second reuses **these new task-specific
+backbones**, and trains new CBMs with the four approved Observation surveys.
+It does not reuse the old CVD-broad/strict fitted models. Other tasks are not
+rerun. Both commands produce the main val/test reports, Full/Basic modality
+ablations, individual and all-ID predicted restoration, plus concept-quality,
+Brier and measured-ID supplementation diagnostics. Completed stages are reused
+if a run is interrupted.
+
+| New task ID | Outcome definition (recorded history) | Source fields | Concept IDs |
+|---|---|---|---|
+| `cardiovascular_conditions_binary` | Broad cardiovascular conditions | `mhoccur_hbp`, `mhoccur_clsh`, `mhoccur_circ`, `mhoccur_rvo`, `mhoccur_cvdot` | 316866, 4159131, 2005200015, 440392, 2005200627 |
+| `major_cardiovascular_events_binary` | Myocardial infarction or stroke history | `mhoccur_mi`, `mhoccur_strk` | 4329847, 2005200628 |
+
+Label adjudication is unchanged: any confirmed Yes gives a positive label;
+every constituent question must explicitly be No to give a negative label.
+Conflicting or discordant condition/response evidence is excluded, as are
+incomplete negatives. The two outcomes can overlap. Each task excludes its own
+outcome fields from Full Clinical inputs and its outcome IDs/fields from the CBM
+supervision bank. Basic Clinical retains exactly the same 23 encoded features.
+
+| Task | Train positive / negative | Validation positive / negative | Test positive / negative | Concept IDs: no / with Observation |
+|---|---:|---:|---:|---:|
+| Broad cardiovascular conditions | 1,117 / 447 | 269 / 83 | 277 / 72 | 107 / 220 |
+| Major cardiovascular events | 127 / 1,444 | 37 / 315 | 51 / 298 | 110 / 223 |
+
+These counts were verified from the supplied local dataset. The cluster runner
+rebuilds the labels, the task-dependent clinical tables and clinical train
+scalers, writing `prepared_inputs/LABEL_COUNTS.csv`. It reuses processed
+nonclinical signals and frozen retinal features from `source_root`; it does not
+repeat their preprocessing. `participants_tsv`, `clinical_dir` and
+`source_root` are configurable. Newly eligible patients must already have
+processed cache entries; absent entries are reported rather than silently
+dropping those patients.
+
+Training-only minority oversampling remains exactly 1:1 each epoch, with plain
+BCE, seed 42, and the original optimization settings. Validation/test keep their
+natural proportions. Checkpoints and positive-class F1 thresholds still use
+validation only; each model's threshold remains fixed for deletion/restoration.
+The reports now include AUROC alongside F1/BA, with 10,000 paired, stratified
+bootstrap samples. AUROC is threshold-independent and receives bootstrap CIs,
+not permutation p/q values; existing F1/BA/Brier inference is retained.
+
+For these configs, `concept_ranking: auroc_mean_plus_2sd` replaces fixed Top10
+display. Within each task and split, rank single Concept IDs by
+`AUROC(restored) - AUROC(masked)`. Compute the mean μ and population SD σ
+(`ddof=0`) across all finite evaluated individual-ID effects, and report **every
+ID strictly above μ + 2σ**. Joint/all-ID restoration is excluded from this
+distribution; source fields sharing an ID are still restored together. No rows
+are added if none pass, and selection uses unrounded effects. Test reports select
+directly on test; validation reports independently use validation. This is an
+exploratory descriptive rule, **not statistical significance**. Its bootstrap
+CIs do not adjust for selecting on the test results. Predicted restoration and
+measured supplementation are ranked separately. Measured-label subsets have
+different denominators, so the common all-participant cohort is the primary
+supplementation comparison.
+
+The two new output roots are:
+
+- `/data/pzhao3/ot2_output/ot2_cardiovascular_v2_no_observation_20261002`
+- `/data/pzhao3/ot2_output/ot2_cardiovascular_v2_with_observation_20261002`
+
+Under each root, `tables/SUMMARY_test.md` and `SUMMARY_val.md` summarize the
+main experiments. `CONCEPT_RESTORATION_ALL_test.csv` contains every individual
+predicted restoration, including AUROC rank, μ, σ, cutoff and selection flag;
+`CONCEPT_RESTORATION_SELECTED_AUROC_test.csv` contains only IDs passing the rule;
+`ALL_CONCEPTS_RESTORED_test.csv` reports simultaneous predicted restoration.
+Measured supplementation and concept quality are in
+`tables/concept_diagnostics/SUMMARY_CONCEPT_DIAGNOSTICS_test.md`, with all-ID CSVs
+alongside it. Diagnostic CSV names containing `BRIER` are retained for continuity
+and now also contain AUROC. Equivalent validation files are saved.
+
+Existing completed runs need `--stage concept-diagnostics` once to compute the
+new AUROC columns; this recomputes only diagnostics, without retraining. Their
+default Brier ranking remains unchanged unless the AUROC rule is configured.
+
 ## Add Brier, concept-quality and measured-value analyses (no retraining)
 
 For the **two completed** Observation experiments, run:

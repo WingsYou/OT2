@@ -10,6 +10,8 @@ sys.path.insert(0,str(HERE/'vendor'))
 from task2_v2_model import PRIMARY_MODALITY_GROUPS as MODALITIES
 
 TASK_LABELS={'moca_binary':'MoCA < 26','cvd_broad_binary':'CVD broad','cvd_strict_binary':'CVD strict',
+ 'cardiovascular_conditions_binary':'Broad cardiovascular conditions',
+ 'major_cardiovascular_events_binary':'Major cardiovascular events',
  'osteoporosis_history_binary':'Osteoporosis history','kidney_history_binary':'Kidney-problem history',
  'lung_history_binary':'Lung-problem history'}
 FULL_CONFIGS={'moca_binary':'moca','cvd_broad_binary':'cvd_broad','cvd_strict_binary':'cvd_strict'}

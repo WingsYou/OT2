@@ -9,18 +9,21 @@ from stats import PairedF1, f1
 from cbm.model import restore, predict
 from cbm.experiment import concept_id_groups, restoration_batch
 
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4
 
 
 def paired_effects(boot, a, b, ca, cb):
     f = boot.effects(a, b, ca, cb)
     ba = boot.effects(a, b, ca, cb, metric='balanced_accuracy')
-    return [{**x, **{'ba_'+k: v for k, v in y.items()}} for x, y in zip(f, ba)]
+    auc = boot.effects(a, b, ca, cb, metric='auroc')
+    return [{**x, **{'ba_'+k: v for k, v in y.items()}, **{'auroc_'+k: v for k, v in z.items()}}
+            for x, y, z in zip(f, ba, auc)]
 
 
 def performance(boot, p, cut):
     return {**boot.performance(p, cut),
-            **{'ba_'+k: v for k, v in boot.performance(p, cut, metric='balanced_accuracy').items()}}
+            **{'ba_'+k: v for k, v in boot.performance(p, cut, metric='balanced_accuracy').items()},
+            **{'auroc_'+k: v for k, v in boot.performance(p, cut, metric='auroc').items()}}
 
 
 def restoration_details(y, restored, masked, cut, learnable):
@@ -113,7 +116,8 @@ def run_analysis(task, cfg, device):
                     n_available=int(removed[name]['available'].sum()),
                     val_rank=top.index(name)+1 if name in top else None,
                     full_f1=baseline['value'], removed_f1=per['value'],
-                    full_ba=baseline['ba_value'], removed_ba=per['ba_value'], **effect))
+                    full_ba=baseline['ba_value'], removed_ba=per['ba_value'],
+                    full_auroc=baseline['auroc_value'], removed_auroc=per['auroc_value'], **effect))
                 predictions[variant+'__without__'+name] = p
         pd.DataFrame(predictions).to_csv(out/f'predictions_{split}.csv', index=False)
         # All tasks use exactly the same Mixed-CBM missing-input condition.
@@ -131,8 +135,9 @@ def run_analysis(task, cfg, device):
         rows = paired_effects(boot, restored, mp, cut, cut)
         perfs = boot.intervals(boot.draws(restored, cut))
         ba_perfs = boot.intervals(boot.draws(restored, cut, metric='balanced_accuracy'))
+        auc_perfs = boot.intervals(boot.draws(restored, cut, metric='auroc'))
         masked_stat = performance(boot, mp, cut); full_stat = performance(boot, fp, cut)
-        for cid, effect, perf, ba_perf, detail in zip(names, rows, perfs, ba_perfs, details):
+        for cid, effect, perf, ba_perf, auc_perf, detail in zip(names, rows, perfs, ba_perfs, auc_perfs, details):
             g = groups.get(cid, dict(concept_name='All CBM concepts restored together',
                 source_fields=list(dict.fromkeys(c['source_field'] for c in model.spec['items'])),
                 columns=list(range(model.spec['width'])), learnable=False))
@@ -143,8 +148,10 @@ def run_analysis(task, cfg, device):
                 family='mixed_all_restoration' if cid=='ALL_CONCEPTS' else 'mixed_restoration', n=n, threshold=cut,
                 full_f1=full_stat['value'], masked_f1=masked_stat['value'],
                 full_ba=full_stat['ba_value'], masked_ba=masked_stat['ba_value'],
+                full_auroc=full_stat['auroc_value'], masked_auroc=masked_stat['auroc_value'],
                 restored_f1=perf['value'], restored_ci_lower=perf['ci_lower'], restored_ci_upper=perf['ci_upper'],
                 restored_ba=ba_perf['value'], restored_ba_ci_lower=ba_perf['ci_lower'], restored_ba_ci_upper=ba_perf['ci_upper'],
+                restored_auroc=auc_perf['value'], restored_auroc_ci_lower=auc_perf['ci_lower'], restored_auroc_ci_upper=auc_perf['ci_upper'],
                 **effect))
         table = pd.DataFrame(restored.T, columns=names)
         table.insert(0,'masked_probability',mp); table.insert(0,'y',y); table.insert(0,'person_id',basic['person_ids'])
@@ -156,4 +163,4 @@ def run_analysis(task, cfg, device):
                        ('restoration',recoveries), ('cohorts',cohorts)]:
         pd.DataFrame(rows).to_csv(out/(name+'.csv'), index=False)
     write_json(out/'DONE.json', dict(task=task, seed=cfg['seed'], bootstrap_samples=cfg['bootstrap_samples'],
-                                   analysis_version=ANALYSIS_VERSION, reported_metrics=['f1','balanced_accuracy']))
+                                   analysis_version=ANALYSIS_VERSION, reported_metrics=['f1','balanced_accuracy','auroc']))

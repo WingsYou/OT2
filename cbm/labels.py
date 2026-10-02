@@ -66,10 +66,12 @@ def load_bank(bank_path=BANK, observation_forms=None, excluded_ids=()):
     return bank
 
 
-def extract(clinical_dir, output, bank_path=BANK, observation_forms=None, excluded_ids=()):
+def extract(clinical_dir, output, bank_path=BANK, observation_forms=None, excluded_ids=(), tasks=None):
     """Read each local table once; retain source values and task-specific masks."""
     clinical_dir, output = Path(clinical_dir), Path(output)
     bank = load_bank(bank_path, observation_forms, excluded_ids)
+    if tasks is not None:
+        bank['tasks'] = {task: bank['tasks'][task] for task in tasks}
     with (clinical_dir / 'person.csv').open(newline='', encoding='utf-8-sig') as f:
         people = sorted({norm(r['person_id']) for r in csv.DictReader(f)})
     cohort = set(people)

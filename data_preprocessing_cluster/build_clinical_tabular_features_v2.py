@@ -409,7 +409,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--clinical_dir", required=True)
     ap.add_argument("--participants", required=True)
-    ap.add_argument("--task", required=True, choices=["moca_binary", "cvd_broad_binary", "cvd_strict_binary"])
+    ap.add_argument("--task", required=True)
     ap.add_argument("--task_config", default=str(Path(__file__).parent / "configs" / "downstream_tasks.json"))
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--min_train_persons", type=int, default=20)

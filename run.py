@@ -75,6 +75,9 @@ def main():
         cfg['backbone_root']=str(Path(cfg['backbone_root']).expanduser().resolve())
         if cfg['backbone_root']==cfg['output_root']:
             raise ValueError('Choose a separate output-root for the new CBMs.')
+    if cfg.get('prepare_cardiovascular_tasks'):
+        cfg['prepared_inputs_root']=str(Path(cfg.get('prepared_inputs_root') or
+            Path(cfg['output_root'])/'prepared_inputs').expanduser().resolve())
     cfg['devices']=list(map(str,cfg['devices']))
     root=Path(cfg['output_root']);source=Path(cfg['source_root'])
     if root==source:raise ValueError('Use a new output directory for the F1 rerun; source_root is read-only.')
@@ -102,12 +105,15 @@ def main():
         status=dict(status='running',stage=a.stage,tasks=cfg['tasks']);write_json(status_path,status)
         try:
             if a.stage in ('all','train'):
+                if cfg.get('prepare_cardiovascular_tasks') and not cfg.get('backbone_root'):
+                    from prepare_cardiovascular_inputs import prepare
+                    prepare(cfg)
                 # These are existing normalized tensors and frozen ResNet features,
                 # not fitted representations from the previous experiment.
                 read_json(source/'inputs.json');read_json(source/'cache/dimensions.json')
                 if not (root/'labels/DONE.json').exists():
                     from cbm.labels import extract,FOUR_OBSERVATION_FORMS,SURVEY_ADMIN_IDS
-                    extract(cfg['clinical_dir'],root/'labels',observation_forms=() if cfg.get('exclude_observation') else FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS)
+                    extract(cfg['clinical_dir'],root/'labels',observation_forms=() if cfg.get('exclude_observation') else FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS,tasks=cfg['tasks'])
                     write_json(root/'labels/DONE.json',dict(clinical_dir=cfg['clinical_dir']))
                 jobs=[(task+'_'+variant,['--task',task,'--variant',variant]) for task in cfg['tasks'] for variant in ('full','basic')]
                 pool(jobs,cfg['devices'],runtime,root)
@@ -117,6 +123,10 @@ def main():
             if diagnostics:
                 jobs=[(task+'_concept_diagnostics',['--task',task,'--concept-diagnostics']) for task in cfg['tasks']]
                 pool(jobs,cfg['devices'],runtime,root,after=lambda:reporter(cfg))
+            elif a.stage=='all' and cfg.get('run_concept_diagnostics'):
+                from cbm.diagnostics_report import make_diagnostics_report
+                jobs=[(task+'_concept_diagnostics',['--task',task,'--concept-diagnostics']) for task in cfg['tasks']]
+                pool(jobs,cfg['devices'],runtime,root,after=lambda:make_diagnostics_report(cfg))
             status['status']='complete';write_json(status_path,status);reporter(cfg)
         except BaseException as exc:
             status.update(status='failed',error=str(exc));write_json(status_path,status);raise

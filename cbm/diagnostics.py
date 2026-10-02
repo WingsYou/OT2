@@ -14,8 +14,8 @@ from stats import PairedF1
 from cbm.model import encode, predict, restore
 from cbm.experiment import concept_id_groups, restoration_batch
 
-VERSION = 1
-METRICS = {'f1': 'f1', 'ba': 'balanced_accuracy', 'brier': 'brier'}
+VERSION = 2
+METRICS = {'f1': 'f1', 'ba': 'balanced_accuracy', 'brier': 'brier', 'auroc': 'auroc'}
 
 
 def aligned_labels(frame, ids):
@@ -93,7 +93,7 @@ def concept_quality(items, frame, training_frame, full, masked):
 def metric_draws(boot, probabilities, cut):
     output = {}
     for name, metric in METRICS.items():
-        if name=='ba' and len(np.unique(boot.y))<2:
+        if name in ('ba','auroc') and len(np.unique(boot.y))<2:
             output[name] = np.full((len(np.atleast_2d(probabilities)), boot.samples+1), np.nan)
         else:
             output[name] = boot.draws(probabilities, cut, metric)
@@ -115,7 +115,7 @@ def supplementation_statistics(boot, baseline, restored, cut):
         perfs = boot.intervals(new_draws[name])
         sign = -1 if name=='brier' else 1
         effects = boot.intervals(sign*(new_draws[name]-base_draws[name]))
-        ps = (np.full(len(rows),np.nan) if name=='ba' and len(np.unique(boot.y))<2
+        ps = (np.full(len(rows),np.nan) if name in ('ba','auroc') and len(np.unique(boot.y))<2
               else boot.pvalues(restored,baseline,cut,cut,metric))
         for row, perf, effect, p in zip(rows,perfs,effects,ps):
             row.update(**interval_fields('baseline_'+name,base), **interval_fields('restored_'+name,perf),
@@ -212,7 +212,7 @@ def run_diagnostics(task, cfg, device):
         predictions = pd.concat([predictions,pd.DataFrame(supplemented.T,columns=names)],axis=1)
         predictions.to_csv(out/f'measured_predictions_{split}.csv',index=False)
         pd.DataFrame(available.T,columns=names,index=cache['person_ids']).rename_axis('person_id').to_csv(out/f'measured_availability_{split}.csv')
-        print(f'[diagnostics {task}/{split}] {len(names)} IDs; quality, Brier and measured supplementation complete',flush=True)
+        print(f'[diagnostics {task}/{split}] {len(names)} IDs; quality, AUROC, Brier and measured supplementation complete',flush=True)
     for name,rows in [('quality',quality),('performance',performance),('comparisons',comparisons),('restoration',restorations)]:
         pd.DataFrame(rows).to_csv(out/(name+'.csv'),index=False)
     write_json(out/'DONE.json',dict(version=VERSION,task=task,bootstrap_samples=cfg['bootstrap_samples'],

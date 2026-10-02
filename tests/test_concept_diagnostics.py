@@ -6,8 +6,8 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import brier_score_loss, f1_score, balanced_accuracy_score
-from stats import PairedF1
+from sklearn.metrics import brier_score_loss, f1_score, balanced_accuracy_score, roc_auc_score
+from stats import PairedF1, auroc, auroc_selection
 from common import save_torch, write_json
 from cbm.model import IndividualCBM, state
 from cbm.experiment import concept_id_groups, restoration_batch
@@ -32,6 +32,35 @@ def specification():
 
 
 class ConceptDiagnosticsTests(unittest.TestCase):
+    def test_auroc_paired_bootstrap_and_selection(self):
+        y=np.array([0,0,0,1,1,1]);a=np.array([.1,.5,.7,.5,.7,.9]);b=np.array([.8,.5,.7,.5,.7,.2])
+        boot=PairedF1(y,100,13,'cpu')
+        probabilities=np.stack([a,b,np.ones(len(y))])
+        expected=[roc_auc_score(y,p) for p in probabilities]
+        np.testing.assert_allclose(auroc(y,probabilities),expected)
+        draws=boot.draws(probabilities,.5,'auroc')
+        np.testing.assert_allclose(draws[:,0],expected)
+        for k in (1,35,100):
+            sample=np.repeat(np.arange(len(y)),boot.w[k].numpy().astype(int))
+            np.testing.assert_allclose(draws[:,k],[roc_auc_score(y[sample],p[sample]) for p in probabilities])
+        row=boot.effects(a,b,.1,.9,'auroc')[0]
+        self.assertAlmostEqual(row['value'],roc_auc_score(y,a)-roc_auc_score(y,b))
+        self.assertTrue(np.isnan(row['p_value']))
+        # Threshold changes do not change AUROC; identical predictions have zero paired CI.
+        same=boot.effects(a,a,.1,.9,'auroc')[0]
+        self.assertEqual([same[k] for k in ('value','ci_lower','ci_upper')],[0.,0.,0.])
+        selection=auroc_selection([0]*9+[1,np.nan])
+        self.assertEqual(selection['auroc_selected'].tolist(),[False]*9+[True,False])
+        self.assertAlmostEqual(selection['auroc_selection_mean'][0],.1)
+        self.assertAlmostEqual(selection['auroc_selection_std'][0],.3)
+        self.assertAlmostEqual(selection['auroc_selection_cutoff'][0],.7)
+        self.assertEqual(selection['auroc_rank_within_split'][:10].tolist(),[2]*9+[1])
+        self.assertFalse(auroc_selection([-1,-1,-1,-1,4])['auroc_selected'].any())  # exactly at cutoff
+        self.assertFalse(auroc_selection([0,0,0])['auroc_selected'].any())
+        self.assertTrue(auroc_selection([-1]*9+[-.1])['auroc_selected'][-1])  # no extra positivity rule
+        single=PairedF1(np.zeros(3,int),10,13,'cpu',allow_single_class=True)
+        self.assertTrue(np.isnan(single.draws(a[:3],.5,'auroc')).all())
+
     def test_brier_bootstrap_and_prediction_swaps(self):
         y=np.array([0,0,0,1,1]);a=np.array([.1,.6,.2,.7,.8]);b=np.array([.2,.5,.1,.6,.7])
         boot=PairedF1(y,100,13,'cpu')
@@ -51,6 +80,7 @@ class ConceptDiagnosticsTests(unittest.TestCase):
         single=PairedF1(np.zeros(3,int),100,13,'cpu',allow_single_class=True)
         row=supplementation_statistics(single,a[:3],b[:3],.5)[0]
         self.assertTrue(np.isnan(row['ba_gain']));self.assertTrue(np.isnan(row['ba_p_value']))
+        self.assertTrue(np.isnan(row['auroc_gain']))
         self.assertAlmostEqual(row['brier_gain'],np.square(a[:3]).mean()-np.square(b[:3]).mean())
 
     def test_measured_encoding_and_partial_id_restoration(self):
@@ -118,6 +148,7 @@ class ConceptDiagnosticsTests(unittest.TestCase):
                     self.assertAlmostEqual(row.restored_brier,brier_score_loss(saved.y,p),places=7)
                     self.assertAlmostEqual(row.restored_f1,f1_score(saved.y,p>=.55))
                     self.assertAlmostEqual(row.restored_ba,balanced_accuracy_score(saved.y,p>=.55))
+                    self.assertAlmostEqual(row.restored_auroc,roc_auc_score(saved.y,p))
                     self.assertEqual(row.changed,row.corrected+row.newly_wrong)
                 if not excluded:
                     row=frame[(frame.concept_id=='102')&(frame.population=='observed_participants')].iloc[0]
@@ -133,6 +164,15 @@ class ConceptDiagnosticsTests(unittest.TestCase):
                 for _, group in frame.groupby('population'):
                     ranks=group.brier_rank_within_split.dropna()
                     self.assertTrue(ranks.is_monotonic_increasing)
+                cfg['concept_ranking']='auroc_mean_plus_2sd'
+                make_diagnostics_report(cfg)
+                text=(table/'SUMMARY_CONCEPT_DIAGNOSTICS_test.md').read_text()
+                self.assertIn('test ΔAUROC > μ + 2σ',text)
+                self.assertIn('not a significance test',text)
+                ranked=pd.read_csv(table/'PREDICTED_RESTORATION_BRIER_test.csv')
+                self.assertEqual(len(ranked),len(concept_id_groups(spec['items'])))
+                self.assertEqual(ranked.auroc_selection_n.iloc[0],len(ranked))
+                np.testing.assert_array_equal(ranked.auroc_selected,ranked.auroc_gain>ranked.auroc_selection_cutoff)
                 with patch('cbm.diagnostics.load',side_effect=AssertionError('must reuse')):
                     run_diagnostics(task,cfg,torch.device('cpu'))
 

@@ -126,7 +126,7 @@ def clinical_inputs(task,cfg,entry):
     table=pd.read_csv(entry['clinical_csv'],dtype={'person_id':str})
     table['person_id']=table.person_id.map(as_person_id);table=table.set_index('person_id')
     names=list(scaler.feature_order);raw=torch.as_tensor(table.loc[ids,names].to_numpy(dtype=np.float32))
-    if task in FULL_CONFIGS:
+    if task in FULL_CONFIGS or entry.get('task_specific_clinical'):
         acquired=master.has_clinical.astype(str).str.lower().isin(('true','1')).to_numpy()
     else:
         presence=read_json(Path(cfg.get('source_root',cfg['output_root']))/'full_clinical_presence.json')

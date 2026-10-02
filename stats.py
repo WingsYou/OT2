@@ -1,4 +1,4 @@
-"""Positive-class F1, balanced accuracy, train-only balancing, and paired participant inference."""
+"""Classification metrics, train-only balancing, and paired participant inference."""
 import numpy as np
 import torch
 from torch.utils.data import Sampler
@@ -8,6 +8,47 @@ def f1(y, probability, cut):
     y = np.asarray(y, bool)
     pred = np.asarray(probability) >= cut
     return 2 * (pred & y).sum(axis=-1) / np.maximum(1, pred.sum(axis=-1) + y.sum())
+
+
+def auroc(y, probability):
+    """Tie-aware AUROC for one or several probability vectors."""
+    y = np.asarray(y, int); p = np.asarray(probability)
+    rows = np.atleast_2d(p)
+    values = np.full(len(rows), np.nan)
+    denominator = int((y == 1).sum()) * int((y == 0).sum())
+    if denominator:
+        for j, row in enumerate(rows):
+            order = np.argsort(row, kind='stable'); truth = y[order]
+            starts = np.r_[0, np.flatnonzero(np.diff(row[order])) + 1]
+            ends = np.r_[starts[1:], len(y)]
+            negative = np.r_[0, (truth == 0).cumsum()]
+            credit = np.repeat((negative[starts] + negative[ends]) / 2, ends-starts)
+            values[j] = credit[truth == 1].sum() / denominator
+    return float(values[0]) if p.ndim == 1 else values
+
+
+def auroc_selection(gains, eligible=None):
+    """Select individual IDs strictly above their own distribution's μ + 2σ.
+
+    Call once per task, split and intervention population, without a joint/all-ID
+    row. σ is the population SD (ddof=0). This is descriptive selection, not a
+    significance test; zero/negative effects are not additionally filtered.
+    """
+    gains = np.asarray(gains, float)
+    valid = np.isfinite(gains)
+    if eligible is not None: valid &= np.asarray(eligible, bool)
+    n = int(valid.sum()); values = gains[valid]
+    mean = float(values.mean()) if n else np.nan
+    std = float(values.std(ddof=0)) if n else np.nan
+    cutoff = mean + 2*std
+    rank = np.full(len(gains), np.nan)
+    rank[valid] = np.searchsorted(np.sort(-values), -values, side='left') + 1
+    return dict(auroc_rank_within_split=rank,
+                auroc_selection_n=np.full(len(gains), n),
+                auroc_selection_mean=np.full(len(gains), mean),
+                auroc_selection_std=np.full(len(gains), std),
+                auroc_selection_cutoff=np.full(len(gains), cutoff),
+                auroc_selected=valid & (gains > cutoff))
 
 
 def threshold(y, probability):
@@ -81,8 +122,10 @@ class PairedF1:
         return 2*tp/(predicted+positive).clamp_min(1)
 
     def draws(self, p, cut, metric='f1'):
-        if metric == 'balanced_accuracy' and len(np.unique(self.y))<2:
+        if metric in ('balanced_accuracy', 'auroc') and len(np.unique(self.y))<2:
             return np.full((len(np.atleast_2d(p)),self.samples+1),np.nan)
+        if metric == 'auroc':
+            return self.auroc_draws(p)
         if metric == 'brier':
             p = torch.as_tensor(np.atleast_2d(p), dtype=torch.float64, device=self.device)
             return ((p-self.truth).square() @ self.w.T / self.w.sum(1)).cpu().numpy()
@@ -91,7 +134,41 @@ class PairedF1:
         predicted = d @ self.w.T
         return self.score(tp, predicted, self.positive, self.w.sum(1), metric).cpu().numpy()
 
+    def auroc_draws(self, p):
+        """Weighted rank AUROC with the same stratified draws as F1/BA.
+
+        Scores are sorted once per intervention, not once per bootstrap sample.
+        Tied positive-negative pairs receive half credit. Small batches bound
+        temporary tensors while using the selected CPU/GPU device.
+        """
+        probabilities = torch.as_tensor(np.atleast_2d(p), dtype=torch.float64, device=self.device)
+        count, n = probabilities.shape
+        budget = 16_000_000 if self.w.is_cuda else 2_000_000
+        batch = max(1, min(count, budget // ((self.samples+1)*n)))
+        position = torch.arange(n, device=self.device)
+        denominator = self.positive * (self.w.sum(1)-self.positive)
+        results = []
+        for start in range(0, count, batch):
+            scores, order = probabilities[start:start+batch].sort(dim=1, stable=True)
+            truth = self.truth[order]
+            same = scores[:,1:] == scores[:,:-1]
+            first = torch.cat([torch.ones_like(same[:,:1]), ~same], dim=1)
+            last = torch.cat([~same, torch.ones_like(same[:,:1])], dim=1)
+            starts = torch.where(first, position, 0).cummax(1).values
+            ends = torch.where(last, position, n-1).flip(1).cummin(1).values.flip(1)
+            weights = self.w[None].expand(len(scores),-1,-1).gather(2,order[:,None].expand(-1,len(self.w),-1))
+            negative = (weights*(1-truth[:,None])).cumsum(2)
+            cumulative = torch.cat([torch.zeros_like(negative[:,:,:1]),negative],dim=2)
+            low = cumulative.gather(2,starts[:,None].expand(-1,len(self.w),-1))
+            high = cumulative.gather(2,(ends+1)[:,None].expand(-1,len(self.w),-1))
+            result = (weights*truth[:,None]*(low+high)*.5).sum(2)/denominator
+            results.append(result.cpu().numpy())
+        return np.concatenate(results)
+
     def pvalues(self, a, b, cut_a, cut_b, metric='f1'):
+        if metric == 'auroc':
+            # AUROC is reported with paired bootstrap CIs, not permutation p/q.
+            return np.full(max(len(np.atleast_2d(a)),len(np.atleast_2d(b))),np.nan)
         if metric == 'balanced_accuracy' and len(np.unique(self.y))<2:
             return np.full(max(len(np.atleast_2d(a)),len(np.atleast_2d(b))),np.nan)
         if metric == 'brier':

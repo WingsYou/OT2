@@ -69,7 +69,8 @@ class F1StudyTests(unittest.TestCase):
     def test_approved_inventory(self):
         bank=load_bank(observation_forms=FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS)
         counts={'moca_binary':222,'cvd_broad_binary':217,'cvd_strict_binary':220,
-                'osteoporosis_history_binary':224,'kidney_history_binary':224,'lung_history_binary':224}
+                'osteoporosis_history_binary':224,'kidney_history_binary':224,'lung_history_binary':224,
+                'cardiovascular_conditions_binary':220,'major_cardiovascular_events_binary':223}
         for task,n in counts.items():self.assertEqual(bank['tasks'][task]['inventory_ids'],n)
         self.assertFalse(set(SURVEY_ADMIN_IDS)&{c['concept_id'] for c in bank['concepts'].values()})
         obs=[c for c in bank['concepts'].values() if c['domain']=='Observation']
@@ -78,8 +79,15 @@ class F1StudyTests(unittest.TestCase):
         self.assertNotIn('mhoccur_rnl',fields)
         reduced=load_bank(observation_forms=(),excluded_ids=SURVEY_ADMIN_IDS)
         self.assertFalse(any(c['domain']=='Observation' for c in reduced['concepts'].values()))
-        self.assertEqual([p['inventory_ids'] for p in reduced['tasks'].values()],
-                         [n-113 for n in (222,217,220,224,224,224)])
+        for task, n in counts.items():
+            self.assertEqual(reduced['tasks'][task]['inventory_ids'],n-113)
+        targets={'cardiovascular_conditions_binary':{'mhoccur_hbp','mhoccur_clsh','mhoccur_circ','mhoccur_rvo','mhoccur_cvdot'},
+                 'major_cardiovascular_events_binary':{'mhoccur_mi','mhoccur_strk'}}
+        for task, excluded in targets.items():
+            fields={bank['concepts'][k]['source_field'] for k in bank['tasks'][task]['concept_keys']}
+            self.assertFalse(fields & excluded)
+            other=set().union(*(v for k,v in targets.items() if k!=task))
+            self.assertTrue(other <= fields)
         for task, policy in bank['tasks'].items():
             nonobs={k for k in policy['concept_keys'] if bank['concepts'][k]['domain']!='Observation'}
             self.assertEqual(nonobs,set(reduced['tasks'][task]['concept_keys']))
@@ -197,7 +205,7 @@ class F1StudyTests(unittest.TestCase):
             self.assertEqual(len(pd.read_csv(out/'tables/ALL_CONCEPTS_RESTORED_test.csv')),1)
             performance=pd.read_csv(out/'tables/MIXED_CBM_PERFORMANCE_test.csv')
             self.assertEqual(set(performance.model),{'mixed_full','mixed_basic','mixed_all_restored'})
-            for metric in ('value','ba_value'):
+            for metric in ('value','ba_value','auroc_value'):
                 self.assertAlmostEqual(performance.loc[performance.model=='mixed_all_restored',metric].iloc[0],performance.loc[performance.model=='mixed_full',metric].iloc[0])
             # Compare diagnostics with the saved patient probabilities.
             saved=pd.read_csv(analysis/'restoration_mixed__nonbasic_clinical_test.csv',float_precision='round_trip')
@@ -205,6 +213,16 @@ class F1StudyTests(unittest.TestCase):
                 prob=saved[row.concept_id].to_numpy(np.float32);masked=saved.masked_probability.to_numpy(np.float32)
                 self.assertEqual(row.n_prediction_changes,int(np.count_nonzero((prob>=row.threshold)!=(masked>=row.threshold))))
                 self.assertAlmostEqual(row.mean_abs_probability_change,float(np.abs(prob-masked).mean()))
+            cfg['concept_ranking']='auroc_mean_plus_2sd'
+            make_report(cfg)
+            exported=pd.read_csv(out/'tables/CONCEPT_RESTORATION_ALL_test.csv',dtype={'concept_id':str})
+            gains=exported.auroc_value.to_numpy()
+            cutoff=gains.mean()+2*gains.std(ddof=0)
+            np.testing.assert_allclose(exported.auroc_selection_cutoff,cutoff)
+            np.testing.assert_array_equal(exported.auroc_selected,gains>cutoff)
+            selected=pd.read_csv(out/'tables/CONCEPT_RESTORATION_SELECTED_AUROC_test.csv',dtype={'concept_id':str})
+            self.assertEqual(set(selected.concept_id),set(exported.loc[gains>cutoff,'concept_id']))
+            self.assertIn('population SD',(out/'tables/SUMMARY_test.md').read_text())
             # Separate output directory reads old backbones; no model retraining.
             import shutil
             reused=root/'reused'; (reused/task).mkdir(parents=True)

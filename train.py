@@ -197,7 +197,7 @@ def cached_removals(task, variant, cfg, device, output):
 def run_model(task, variant, cfg, device):
     root = Path(cfg['output_root'])/task/variant; root.mkdir(parents=True, exist_ok=True)
     if (root/'DONE.json').exists(): print(f'[reuse] {task}/{variant}', flush=True); return
-    source = Path(cfg['source_root']); entry = read_json(source/'inputs.json')[task]
+    source = Path(cfg.get('prepared_inputs_root') or cfg['source_root']); entry = read_json(source/'inputs.json')[task]
     master, values, mask, basic, names, excluded = clinical_inputs(task, cfg, entry)
     if variant=='basic': values=values[:,basic]; mask=mask[:,basic]; names=[names[i] for i in basic]
     write_json(root/'input_columns.json', dict(clinical_features=names, target_columns_removed=excluded,
