@@ -5,6 +5,49 @@ how much does removing each modality affect them; and which Mixed-CBM concept
 channels recover performance when nonbasic structured clinical inputs are missing?
 Raw preprocessing and the original train/validation/test split are unchanged.
 
+## SI control: Full versus Basic modality ablation (no retraining)
+
+To document why the Basic Clinical restriction is informative, apply the same
+11 input removals to both fitted multimodal models across the current six tasks:
+
+```bash
+cd ~/OT2
+git pull origin main
+conda activate ot2
+python -u run_modality_control.py --devices 0 1 2 3
+```
+
+`modality_control.yaml` locates the four existing tasks and the two replacement
+cardiovascular tasks via their completed runs' `runtime.yaml`. It reads the
+original Full/Basic backbones, not the CBMs. Existing deletion probabilities are
+reused; missing deletions use cached source tokens and only the fusion/classifier.
+No fitting, encoder passes, raw preprocessing or concept analysis is run.
+
+Outputs are separate, under
+`/data/pzhao3/ot2_output/ot2_modality_control_20261002/tables/`:
+
+- `SUMMARY_MODALITY_CONTROL_test.md` and `_val.md`: Full/Basic drops side by side,
+  with AUROC, positive-class F1, BA and 10,000 paired bootstrap CIs. All 11 removals
+  are retained, including negative or small effects; no Top3 selection.
+- `MODALITY_ABLATION_full_test.csv` and `MODALITY_ABLATION_basic_test.csv`: every
+  drop and absolute removed performance, frozen thresholds and availability.
+- `DOWNSTREAM_REFERENCE_test.csv`: Full; Full with only Basic Clinical at
+  inference; separately trained Basic. All CSVs also have validation versions.
+
+Each CSV uses one row per metric. Source outputs remain unchanged; completed
+tasks resume. To rebuild only the tables, use
+`python run_modality_control.py --stage report`.
+
+This control tests reliance on modalities under different clinical-input
+settings. It can support the rationale for a restricted-clinical analysis, but
+does not prove clinical causality or that small Full-model effects imply a
+modality lacks value. Removing a nonclinical branch leaves all clinical proxies
+intact. Removing the clinical branch removes **all** of that model's clinical
+inputs, whereas the reference condition with Basic Clinical retained removes
+only nonbasic clinical inputs. F1/BA use each backbone's own saved validation
+threshold throughout. AUROC helps distinguish changes in discrimination from
+effects specific to thresholded decisions.
+
 ## Six-task concept recovery from completed models (no retraining)
 
 This entry point combines MoCA, **the two replacement cardiovascular tasks**,

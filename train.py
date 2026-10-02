@@ -167,7 +167,7 @@ class FrozenFusionReadout(torch.nn.Module):
         return dict(embedding=embedding, logits=self.head(embedding))
 
 
-def cached_removals(task, variant, cfg, device, output):
+def cached_removals(task, variant, cfg, device, output, source_analysis=None):
     """Reuse existing ablations or compute missing ones without touching the source run."""
     from common import backbone_dir
     root = backbone_dir(task, cfg)/variant
@@ -176,10 +176,13 @@ def cached_removals(task, variant, cfg, device, output):
     for split in ('val', 'test'):
         original = root/f'removals_{split}.pt'
         path = output/f'removals_{variant}_{split}.pt'
+        previous = source_analysis/f'removals_{variant}_{split}.pt' if source_analysis else None
         if original.exists():
             results[split] = load(original)
         elif path.exists():
             results[split] = load(path)
+        elif previous is not None and previous.exists():
+            results[split] = load(previous)
         else:
             if model is None:
                 model = FrozenFusionReadout(load(root/'best.pt'), task).to(device).eval()
