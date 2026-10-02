@@ -16,7 +16,9 @@ def main():
     device=torch.device('cpu' if a.cpu else 'cuda:0')
     if device.type=='cuda':torch.backends.cudnn.benchmark=True
     if a.concept_diagnostics:
-        from cbm.diagnostics import run_diagnostics
+        from cbm.diagnostics import resolve_diagnostic_config, run_diagnostics
+        if cfg.get('diagnostic_sources'):
+            cfg=resolve_diagnostic_config(a.task,cfg)
         run_diagnostics(a.task,cfg,device)
     elif a.analyze:
         from analysis import run_analysis

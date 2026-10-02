@@ -5,6 +5,78 @@ how much does removing each modality affect them; and which Mixed-CBM concept
 channels recover performance when nonbasic structured clinical inputs are missing?
 Raw preprocessing and the original train/validation/test split are unchanged.
 
+## Six-task concept recovery from completed models (no retraining)
+
+This entry point combines MoCA, **the two replacement cardiovascular tasks**,
+Osteoporosis, Kidney and Lung. For each task, it evaluates both:
+
+- **Predicted concept recovery:** replace one ID's masked-input concept channels
+  with the same participant's full-input predicted concepts.
+- **Measured concept supplementation:** replace the observed, encodable channels
+  of one ID with recorded measurements/responses, using the checkpoint's saved
+  normalization/category order. Other channels remain predicted. This edits the
+  concept bottleneck; it does not put the original clinical block back into the
+  input encoder.
+
+Start with the no-Observation bank:
+
+```bash
+cd ~/OT2
+git pull origin main
+conda activate ot2
+python -u run_concept_recovery.py --bank without_observation --devices 0 1 2 3
+```
+
+To analyze both banks, after **both** cardiovascular runs below have finished:
+
+```bash
+python -u run_concept_recovery.py --bank both --devices 0 1 2 3
+```
+
+`concept_recovery.yaml` maps the original four tasks to the completed September
+CBM runs and the two new cardiovascular tasks to the October runs. Edit those
+source paths if your cluster directories differ. Each source run's `runtime.yaml`
+identifies its own frozen backbone. Full and masked CBM predictions use that
+CBM's saved masked-validation threshold; test is not used to optimize thresholds.
+
+No model fitting, raw preprocessing or feature extraction occurs. Complete
+AUROC-enabled diagnostics with matching seed/bootstrap settings are copied into
+the new report directory and reused. Older Brier-only diagnostics are recomputed
+from cached embeddings, saved concept targets and the existing Mixed-CBM head.
+The four GPU workers process the remaining tasks. Source runs are read-only, and
+interrupted runs resume from completed analyses.
+
+Output:
+
+```text
+/data/pzhao3/ot2_output/ot2_six_task_concept_recovery_20261002/
+  without_observation/tables/
+  with_observation/tables/
+```
+
+Each bank has a concise `SUMMARY_CONCEPT_RECOVERY_test.md` and validation
+counterpart, plus `PREDICTED_CONCEPT_RECOVERY_ALL_test.csv`,
+`MEASURED_CONCEPT_RECOVERY_ALL_test.csv` and their `SELECTED` counterparts.
+`ALL` means **all individually evaluated IDs**, not simultaneous restoration.
+These tables use the same all-participant cohort for each ID; observed-label
+subset analyses and concept-prediction quality remain under
+`tables/concept_diagnostics/`. Eligibility counts make measured-label coverage
+explicit. All comparisons retain AUROC, F1, BA and Brier with paired CIs.
+
+For each task, split and restoration type separately, the report ranks single
+IDs by ΔAUROC and displays every ID strictly above μ + 2σ (population SD,
+`ddof=0`). Neither tasks nor measured/predicted gains are pooled to set the
+cutoff. Test selects directly on test; validation has its own descriptive list.
+No fixed Top10 is imposed. The rule is exploratory and is not a significance
+test. Existing F1/BA/Brier q values are recalculated across the six completed
+tasks within each metric/intervention family; they can differ from earlier
+two-task reports. AUROC receives paired bootstrap CIs without p/q values.
+
+Regenerate just the consolidated tables later with
+`python run_concept_recovery.py --bank without_observation --stage report`.
+This reads saved CSVs and uses no GPU. `SOURCE_RUNS.json` records each task's
+original experiment directory.
+
 ## Replacement cardiovascular tasks and AUROC concept selection
 
 Run only the two replacement tasks, with the same training pipeline:
