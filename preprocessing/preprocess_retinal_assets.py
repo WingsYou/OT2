@@ -2,7 +2,7 @@
 """Preprocess metadata-rich AI-READI retinal assets into auditable V2 artifacts.
 
 This stage consumes either ``retinal_asset_index.csv`` or
-``retinal_default_model_view.csv`` from ``build_retinal_asset_index_v2.py``.
+``retinal_default_model_view.csv`` from ``build_retinal_asset_index.py``.
 It deliberately keeps the long-asset semantics of that index: photography
 protocols, OCT/OCTA volumes, OCTA en-face slabs, and FLIO wavelengths remain
 separate assets instead of being silently averaged into participant slots.
@@ -82,14 +82,14 @@ except Exception:  # pragma: no cover - progress is optional
     tqdm = None
 
 try:  # Support both ``python ot2/file.py`` and ``import ot2.file``.
-    from .preprocessing_v2 import (
+    from .preprocessing_utils import (
         artifact_config,
         as_person_id,
         canonical_json_hash,
         source_file_metadata,
     )
 except ImportError:
-    from preprocessing_v2 import (  # type: ignore
+    from preprocessing_utils import (  # type: ignore
         artifact_config,
         as_person_id,
         canonical_json_hash,

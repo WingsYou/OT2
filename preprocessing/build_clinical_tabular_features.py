@@ -18,11 +18,11 @@ import numpy as np
 import pandas as pd
 
 try:
-    from .preprocessing_v2 import (
+    from .preprocessing_utils import (
         PREPROCESSING_VERSION, as_person_id, canonical_json_hash, source_file_metadata,
     )
 except ImportError:
-    from preprocessing_v2 import (  # type: ignore
+    from preprocessing_utils import (  # type: ignore
         PREPROCESSING_VERSION, as_person_id, canonical_json_hash, source_file_metadata,
     )
 
@@ -554,7 +554,7 @@ def main() -> None:
     feature_names = [c for c in merged.columns if c != "person_id"]
     preprocessing_config = {
         "preprocessing_version": PREPROCESSING_VERSION,
-        "builder": "build_clinical_tabular_features_v2.py",
+        "builder": "build_clinical_tabular_features.py",
         "task": args.task,
         "task_config_hash": task_config_hash,
         "fit_split": "train",

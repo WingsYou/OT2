@@ -34,13 +34,13 @@ import numpy as np
 import pandas as pd
 
 try:
-    from ot2.preprocessing_v2 import (
+    from .preprocessing_utils import (
         PREPROCESSING_VERSION,
         as_person_id,
         canonical_json_hash,
     )
-except ModuleNotFoundError:  # Allow ``python ot2/fit_train_scalers_v2.py``.
-    from preprocessing_v2 import (  # type: ignore
+except ImportError:  # Allow ``python preprocessing/fit_train_scalers.py``.
+    from preprocessing_utils import (  # type: ignore
         PREPROCESSING_VERSION,
         as_person_id,
         canonical_json_hash,

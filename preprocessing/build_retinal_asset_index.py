@@ -18,14 +18,14 @@ import numpy as np
 import pandas as pd
 
 try:
-    from .preprocessing_v2 import (
+    from .preprocessing_utils import (
         PREPROCESSING_VERSION,
         as_person_id,
         canonical_json_hash,
         source_file_metadata,
     )
 except ImportError:
-    from preprocessing_v2 import (  # type: ignore
+    from preprocessing_utils import (  # type: ignore
         PREPROCESSING_VERSION,
         as_person_id,
         canonical_json_hash,
@@ -301,7 +301,7 @@ def main() -> None:
     ]
     preprocessing_config = {
         "preprocessing_version": PREPROCESSING_VERSION,
-        "builder": "build_retinal_asset_index_v2.py",
+        "builder": "build_retinal_asset_index.py",
         "selection_group": [
             "person_id", "laterality", "modality", "protocol", "slab_or_wavelength"
         ],

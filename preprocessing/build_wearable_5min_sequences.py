@@ -3,7 +3,7 @@
 
 This is the V2 replacement for ``build_wearable_hourly_sequences.py``.  It
 keeps CGM and Garmin activity as separate tensors on one participant-level
-absolute UTC grid.  The shared grid is defined by ``preprocessing_v2`` and is
+absolute UTC grid.  The shared grid is defined by ``preprocessing_utils`` and is
 anchored at the study-visit date in local civil time (5 minutes x 10 days by
 default).
 
@@ -50,7 +50,7 @@ except Exception:  # pragma: no cover - tqdm is optional
     tqdm = None
 
 try:
-    from preprocessing_v2 import (
+    from .preprocessing_utils import (
         ParticipantAnchor,
         TimeGridSpec,
         artifact_config,
@@ -63,8 +63,8 @@ try:
         slot_indices,
         source_file_metadata,
     )
-except ImportError:  # Support ``python -m ot2.build_wearable_5min_sequences``.
-    from ot2.preprocessing_v2 import (  # type: ignore
+except ImportError:  # Allow direct script execution.
+    from preprocessing_utils import (  # type: ignore
         ParticipantAnchor,
         TimeGridSpec,
         artifact_config,

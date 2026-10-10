@@ -9,7 +9,7 @@ adapter loads each selected canonical artifact once and writes an explicitly
 whitelisted, float16 model-view sidecar.  Canonical artifacts are never
 modified or deleted.
 
-The output index remains compatible with ``build_multimodal_index_v2.py``:
+The output index remains compatible with ``build_multimodal_index.py``:
 ``artifact_config_hash`` continues to identify the upstream pixel
 preprocessing contract, while ``model_view_config_hash`` separately identifies
 this lossless-metadata/lower-precision-storage adapter.
@@ -42,9 +42,9 @@ except ImportError:  # pragma: no cover - progress is optional
     tqdm = None
 
 try:
-    from ot2.preprocessing_v2 import canonical_json_hash
-except ModuleNotFoundError:
-    from preprocessing_v2 import canonical_json_hash  # type: ignore
+    from .preprocessing_utils import canonical_json_hash
+except ImportError:
+    from preprocessing_utils import canonical_json_hash  # type: ignore
 
 
 FORMAT_VERSION = "retinal-model-view-sidecar-v2.1"
@@ -545,7 +545,7 @@ def main() -> None:
     selected, omitted = _select_with_caps(frame, caps)
     model_view_config = {
         "model_view_format_version": FORMAT_VERSION,
-        "builder": "build_retinal_model_view_sidecars_v2.py",
+        "builder": "build_retinal_model_view_sidecars.py",
         "upstream_artifact_config_hash": hashes[0],
         "storage_dtype": "float16",
         "metadata_serialization": METADATA_SERIALIZATION_VERSION,

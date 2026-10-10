@@ -18,7 +18,7 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 PREP = HERE / 'preprocessing'
-CARDIOVASCULAR_SPEC = PREP / 'configs/cardiovascular_tasks_v2.json'
+CARDIOVASCULAR_SPEC = PREP / 'configs/cardiovascular_tasks.json'
 CARDIOVASCULAR_TASKS = ('cardiovascular_conditions_binary', 'major_cardiovascular_events_binary')
 # Historical preprocessing namespaces are intermediate files, not study endpoints.
 PREPROCESSING_TASKS = ('moca_binary', 'cvd_broad_binary', 'cvd_strict_binary')
@@ -68,15 +68,15 @@ def raw_commands(cfg):
     m = {k: v or '<SET_' + k + '_MANIFEST>' for k, v in cfg['manifests'].items()}
     yield command('build_downstream_labels.py', '--participants', people,
                   '--clinical_dir', clinical, '--out_dir', root/'labels')
-    yield command('build_retinal_asset_index_v2.py', '--participants', people,
+    yield command('build_retinal_asset_index.py', '--participants', people,
                   *[x for k in ('retinal_photography','retinal_oct','retinal_octa','retinal_flio')
                     for x in ('--'+k, m[k])], '--out_dir', root/'retinal_index')
-    yield command('preprocess_retinal_assets_v2.py', '--asset-index', root/'retinal_index/retinal_asset_index.csv',
+    yield command('preprocess_retinal_assets.py', '--asset-index', root/'retinal_index/retinal_asset_index.csv',
                   '--dataset-root', dataset, '--out-dir', root/'retinal', '--num-workers', n)
-    yield command('build_retinal_model_view_sidecars_v2.py', '--retinal-index', root/'retinal/retinal_preprocessed_index.csv',
+    yield command('build_retinal_model_view_sidecars.py', '--retinal-index', root/'retinal/retinal_preprocessed_index.csv',
                   '--out-dir', root/'retinal_model_views', '--num-workers', n,
                   '--max-photography-assets', 6, '--max-oct-assets', 2, '--max-octa-assets', 16, '--max-flio-assets', 4)
-    yield command('build_ecg_waveform_features_v2.py', '--manifest', m['cardiac_ecg'],
+    yield command('build_ecg_waveform_features.py', '--manifest', m['cardiac_ecg'],
                   '--dataset-root', dataset, '--out-dir', root/'ecg', '--num-workers', n)
     yield command('build_environment_5min_sequences.py', '--participants', people,
                   '--manifest', m['environment'], '--dataset_root', dataset,
@@ -87,10 +87,10 @@ def raw_commands(cfg):
     for task in PREPROCESSING_TASKS:
         folder = root/'clinical'/task
         wide = folder/f'clinical_features_{task}_wide.csv'; schema = folder/f'clinical_schema_{task}.json'
-        yield command('build_clinical_tabular_features_v2.py', '--participants', people,
+        yield command('build_clinical_tabular_features.py', '--participants', people,
                       '--clinical_dir', clinical, '--task', task, '--out_dir', folder,
                       '--include_condition', '--include_procedure')
-        yield command('fit_train_scalers_v2.py', '--participants', people,
+        yield command('fit_train_scalers.py', '--participants', people,
                       '--clinical-wide', wide, '--clinical-schema', schema,
                       '--ecg-numeric-wide', root/'ecg/ecg_numeric_features_wide.csv',
                       '--ecg-channel-stats', root/'ecg/ecg_channel_stats.csv', '--ecg-schema', root/'ecg/ecg_schema.json',
@@ -99,7 +99,7 @@ def raw_commands(cfg):
                       '--wearable-index', root/'wearable_v5/wearable_5min_index.csv',
                       '--wearable-artifact-dir', root/'wearable_v5', '--wearable-schema', root/'wearable_v5/wearable_5min_schema.json',
                       '--output', root/f'scalers/train_scalers_{task}.json')
-        yield command('build_multimodal_index_v2.py', '--participants', people,
+        yield command('build_multimodal_index.py', '--participants', people,
                       '--labels', root/f'labels/labels_{task}.csv', '--clinical_features', wide, '--clinical_schema', schema,
                       '--retinal_index', root/'retinal_model_views/retinal_model_view_index.csv',
                       '--ecg_index', root/'ecg/ecg_index.csv', '--environment_index', root/'environment_v4/environment_5min_index.csv',
@@ -139,8 +139,8 @@ def run_raw(cfg, dry_run=False):
 def make_cache_index(cfg):
     """Join processed modality artifacts to all official participants, without y."""
     sys.path.insert(0, str(PREP))
-    from build_multimodal_index_v2 import _single_artifact_view, _retinal_view
-    from preprocessing_v2 import as_person_id, canonical_json_hash
+    from build_multimodal_index import _single_artifact_view, _retinal_view
+    from preprocessing_utils import as_person_id, canonical_json_hash
 
     prepared, source = Path(cfg['prepared_root']), Path(cfg['source_root'])
     people = pd.read_csv(cfg['participants'], sep='\t', dtype={'person_id': str})
@@ -198,7 +198,7 @@ def make_registry(cfg, cache_index):
     from infosign.common import original_config, FULL_CONFIGS, HISTORY_TARGETS
     from infosign.native_data import as_person_id
     sys.path.insert(0, str(PREP))
-    from build_history_task_labels_v1 import build
+    from build_history_task_labels import build
 
     source = Path(cfg['source_root'])
     entries = {}
@@ -255,7 +255,7 @@ def prepare_cardiovascular(cfg):
     from infosign.common import BASIC_KEYS
     # The existing scaler's clinical-only function does not read other modalities.
     sys.path.insert(0, str(PREP))
-    from fit_train_scalers_v2 import fit_clinical, load_fit_population
+    from fit_train_scalers import fit_clinical, load_fit_population
 
     source = Path(cfg['source_root'])
     destination = Path(cfg.get('prepared_inputs_root') or Path(cfg['output_root']) / 'prepared_inputs')
@@ -302,7 +302,7 @@ def prepare_cardiovascular(cfg):
         for key in ('include_condition', 'include_procedure'):
             if options.get(key):
                 args.append('--' + key)
-        run_clinical_builder('build_clinical_tabular_features_v2.py', args, folder / 'clinical_build.log')
+        run_clinical_builder('build_clinical_tabular_features.py', args, folder / 'clinical_build.log')
         wide_path = folder / f'clinical_features_{task}_wide.csv'
         schema_path = folder / f'clinical_schema_{task}.json'
         schema = read_json(schema_path)

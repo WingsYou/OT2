@@ -54,14 +54,14 @@ except Exception:  # pragma: no cover - tqdm is optional
     tqdm = None
 
 try:  # Support both ``python ot2/file.py`` and ``import ot2.file``.
-    from .preprocessing_v2 import (
+    from .preprocessing_utils import (
         artifact_config,
         as_person_id,
         canonical_json_hash,
         source_file_metadata,
     )
 except ImportError:
-    from preprocessing_v2 import (  # type: ignore
+    from preprocessing_utils import (  # type: ignore
         artifact_config,
         as_person_id,
         canonical_json_hash,
@@ -1127,7 +1127,7 @@ def _build_run_config(args: argparse.Namespace, qc: LeadQCThresholds) -> Dict[st
     return artifact_config(
         modality="cardiac_ecg",
         extra={
-            "builder": "build_ecg_waveform_features_v2.py",
+            "builder": "build_ecg_waveform_features.py",
             "representation": "raw_physical_millivolts",
             "target_fs": args.target_fs,
             "target_samples": args.target_samples,

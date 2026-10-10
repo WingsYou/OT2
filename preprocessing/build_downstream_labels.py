@@ -14,11 +14,11 @@ from typing import Any, Dict, Iterable
 import pandas as pd
 
 try:
-    from .preprocessing_v2 import (
+    from .preprocessing_utils import (
         PREPROCESSING_VERSION, as_person_id, canonical_json_hash, source_file_metadata,
     )
 except ImportError:
-    from preprocessing_v2 import (  # type: ignore
+    from preprocessing_utils import (  # type: ignore
         PREPROCESSING_VERSION, as_person_id, canonical_json_hash, source_file_metadata,
     )
 

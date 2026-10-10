@@ -4,7 +4,7 @@
 This is the V2, task-independent replacement for
 ``build_environment_hourly_sequences.py``.  It keeps the 5-minute resolution
 used by LANISTR, but aligns every longitudinal modality to the same absolute
-participant grid defined in :mod:`ot2.preprocessing_v2` instead of anchoring
+participant grid defined in :mod:`preprocessing.preprocessing_utils` instead of anchoring
 each source independently at its first observation.
 
 The default per-participant artifact contains 10 days x 288 five-minute slots
@@ -54,7 +54,7 @@ except Exception:  # pragma: no cover - tqdm is optional
     tqdm = None
 
 try:
-    from ot2.preprocessing_v2 import (
+    from .preprocessing_utils import (
         ParticipantAnchor,
         TimeGridSpec,
         artifact_config,
@@ -67,8 +67,8 @@ try:
         slot_indices,
         source_file_metadata,
     )
-except ModuleNotFoundError:  # Allow ``python ot2/build_environment_5min_sequences.py``.
-    from preprocessing_v2 import (  # type: ignore
+except ImportError:  # Allow ``python preprocessing/build_environment_5min_sequences.py``.
+    from preprocessing_utils import (  # type: ignore
         ParticipantAnchor,
         TimeGridSpec,
         artifact_config,
@@ -1577,7 +1577,7 @@ def main() -> None:
         },
         "notes": [
             "The default grid is 5 minutes x 10 days (2880 slots).",
-            "The participant anchor is shared with CGM/activity via preprocessing_v2.py.",
+            "The participant anchor is shared with CGM/activity via preprocessing_utils.py.",
             "An exact shared anchor override table can replace the provisional visit-date anchor.",
             "Raw timestamps are parsed as UTC; circadian features use participant local time.",
             "UTC offset is retained in anchor metadata, not exposed as a model feature, to reduce site shortcuts.",

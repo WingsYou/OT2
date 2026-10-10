@@ -53,7 +53,7 @@ TASK_SOURCES = {
     "urinary_history_binary": ("mhoccur_ua", 81902),
 }
 TASKS = tuple(TASK_SOURCES)
-SPEC_PATH = Path(__file__).resolve().parent/"configs/history_tasks_v1.json"
+SPEC_PATH = Path(__file__).resolve().parent/"configs/history_tasks.json"
 
 
 def load_spec():

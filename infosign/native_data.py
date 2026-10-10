@@ -15,7 +15,7 @@ cohort during construction.  Retinal artifacts are reduced immediately to
 their model views and masks.  In particular, the optional FLIO lossless decay
 cube archive is never returned, decoded, copied into a sample, or cached by this
 module.  For repeated training, use the archive-free index produced by
-``build_retinal_model_view_sidecars_v2.py``; directly loading the canonical
+``build_retinal_model_view_sidecars.py``; directly loading the canonical
 monolithic FLIO artifacts still materializes their compressed archive bytes.
 
 Import the native artifact loader through ``infosign.native_data``.
@@ -496,7 +496,7 @@ class OT2V2Dataset(Dataset):
                 "flio_archive_policy": "never decode, return, or cache lossless archive",
                 "monolithic_torch_save_limitation": (
                     "torch.load materializes compressed archive bytes; use the slim "
-                    "model-view index from build_retinal_model_view_sidecars_v2.py "
+                    "model-view index from build_retinal_model_view_sidecars.py "
                     "for archive-free repeated training I/O"
                 ),
                 "upstream_artifact_config_hash": self.retinal_artifact_config_hash,
@@ -1223,7 +1223,7 @@ class OT2V2Dataset(Dataset):
                     "FLIO artifact is a monolithic torch.save payload: torch.load has "
                     "materialized its compressed lossless archive bytes even though the "
                     "Model V2 loader will neither decode nor retain them. Generate slim "
-                    "model-view sidecars with build_retinal_model_view_sidecars_v2.py "
+                    "model-view sidecars with build_retinal_model_view_sidecars.py "
                     "for efficient repeated training I/O.",
                     RuntimeWarning,
                     stacklevel=2,
