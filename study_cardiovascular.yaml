@@ -1,10 +1,9 @@
-# Replacement cardiovascular tasks; reuse processed nonclinical inputs/cache.
-source_root: /data/pzhao3/ot2_output/six_task_study_v1_20260913
-output_root: /data/pzhao3/ot2_output/ot2_cardiovascular_v2_no_observation_20261002
-clinical_dir: /data/EMED/AIREADI/aireadi300/d55855bd-e2fb-4e53-a07f-e5fd3c41707a/dataset/clinical_data
-participants_tsv: /data/EMED/AIREADI/aireadi300/d55855bd-e2fb-4e53-a07f-e5fd3c41707a/dataset/participants.tsv
-prepare_cardiovascular_tasks: true
+# Run from the repository root. AI-READI data must be obtained separately.
+source_root: outputs/prepared
+output_root: outputs/cardiovascular_without_observation
+clinical_dir: data/aireadi/clinical_data
 exclude_observation: true
+cbm_modes: [mixed]
 concept_ranking: auroc_mean_plus_2sd
 run_concept_diagnostics: true
 

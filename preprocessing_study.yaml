@@ -1,8 +1,9 @@
-output_root: /data/pzhao3/ot2_output/six_task_study_v1_20260913
-artifact_root: /data/pzhao3/ot2_output
-history_root: /data/pzhao3/ot2_output/history_tasks_v1_20260912
-concept_root: /data/pzhao3/ot2_output/cbm_strict_v1_20260910
-history_concept_root: /data/pzhao3/ot2_output/cbm_history_v1_20260913/strict
+# Legacy original-task preparation settings; public entry point: prepare_public_inputs.py.
+output_root: outputs/prepared
+artifact_root: outputs/preprocessed
+history_root: outputs/preprocessed/supplemental_inputs/history
+concept_root: outputs/preprocessed/supplemental_inputs/concepts
+history_concept_root: outputs/preprocessed/supplemental_inputs/concepts
 devices: [0, 1, 2, 3]
 seed: 42
 batch_size: 32

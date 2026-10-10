@@ -36,8 +36,7 @@ def save_csv(path,frame):
 def original_config(task,cfg):
     if task in FULL_CONFIGS:
         data=yaml.safe_load((HERE/'configs'/(FULL_CONFIGS[task]+'_full.yaml')).read_text())
-        old='/data/pzhao3/ot2_output';new=str(cfg['artifact_root'])
-        data=json.loads(json.dumps(data).replace(old,new))
+        data=json.loads(json.dumps(data).replace('{artifact_root}',str(cfg['artifact_root'])))
         return data
     return yaml.safe_load((Path(cfg['history_root'])/'inputs'/task/'train_config.yaml').read_text())
 def concept_dir(task,cfg):

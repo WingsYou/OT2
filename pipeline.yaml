@@ -1,18 +1,24 @@
-# Only needed to regenerate inputs. run.py continues to use existing study.yaml.
-dataset_root: /data/EMED/AIREADI/aireadi300/d55855bd-e2fb-4e53-a07f-e5fd3c41707a/dataset
+# Raw AI-READI v3.0.0 download, preserving its directory structure.
+# Paths are relative to the repository root; absolute paths also work.
+dataset_root: data/aireadi
 participants: "{dataset_root}/participants.tsv"
 clinical_dir: "{dataset_root}/clinical_data"
-# Set these eight paths to the actual manifest TSVs before running `raw` or `all`.
-# A manifest is an input inventory, not the processed tensor index.
 manifests:
-  retinal_photography: null
-  retinal_oct: null
-  retinal_octa: null
-  retinal_flio: null
-  cardiac_ecg: null
-  environment: null
-  wearable_activity_monitor: null
-  wearable_blood_glucose: null
-prepared_root: /data/pzhao3/ot2_output/six_task_prepared_v1_20260913
-new_output_root: /data/pzhao3/ot2_output/six_task_complete_v1_20260913
+  retinal_photography: "{dataset_root}/retinal_photography/manifest.tsv"
+  retinal_oct: "{dataset_root}/retinal_oct/manifest.tsv"
+  retinal_octa: "{dataset_root}/retinal_octa/manifest.tsv"
+  retinal_flio: "{dataset_root}/retinal_flio/manifest.tsv"
+  cardiac_ecg: "{dataset_root}/cardiac_ecg/manifest.tsv"
+  environment: "{dataset_root}/environment/manifest.tsv"
+  wearable_activity_monitor: "{dataset_root}/wearable_activity_monitor/manifest.tsv"
+  wearable_blood_glucose: "{dataset_root}/wearable_blood_glucose/manifest.tsv"
+prepared_root: outputs/preprocessed
+source_root: outputs/prepared
+new_output_root: outputs/study_without_observation
 workers: 8
+devices: [0, 1, 2, 3]
+num_workers: 2
+cpu_threads: 2
+cache_people_per_batch: 4
+retinal_batch_size: 128
+retinal_weights_path: null

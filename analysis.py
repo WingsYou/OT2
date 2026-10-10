@@ -49,13 +49,16 @@ def run_analysis(task, cfg, device):
     root = Path(cfg['output_root'])/task
     backbone = backbone_dir(task, cfg)
     out = root/'analysis'; out.mkdir(parents=True, exist_ok=True)
-    if (out/'DONE.json').exists() and read_json(out/'DONE.json').get('analysis_version') == ANALYSIS_VERSION:
+    modes = cfg.get('cbm_modes', ['basic','mixed'])
+    done = read_json(out/'DONE.json') if (out/'DONE.json').exists() else {}
+    if (done.get('analysis_version') == ANALYSIS_VERSION
+            and done.get('cbm_modes', ['basic','mixed']) == modes):
         print(f'[reuse analysis] {task}', flush=True); return
     # Invalidate old completion before writing the replacement tables.
     (out/'DONE.json').unlink(missing_ok=True)
     # Original multimodal checkpoints/features are read-only, including on upgrade.
     removals = {v: cached_removals(task, v, cfg, device, out) for v in ('full','basic')}
-    artifacts = {mode: load(root/(mode+'_cbm')/'model.pt') for mode in ('basic','mixed')}
+    artifacts = {mode: load(root/(mode+'_cbm')/'model.pt') for mode in modes}
     models = {mode: restore(a, device) for mode, a in artifacts.items()}
     groups = concept_id_groups(artifacts['mixed']['spec']['items'])
     cuts = {k: read_json(backbone/k/'TRAINING_DONE.json')['threshold'] for k in ('full','basic')}
@@ -71,16 +74,17 @@ def run_analysis(task, cfg, device):
             raise ValueError(f'{task}/{split}: Full and Basic predictions must use the same ordered participants')
         y = basic['y'].numpy(); n = len(y)
         boot = PairedF1(y, cfg['bootstrap_samples'], cfg['seed'], device)
-        _, bp = predict(models['basic'], basic['embedding'])
         fz, fp = predict(models['mixed'], full['embedding'])
         mz, mp = predict(models['mixed'], full['masked_embedding'])
         conditions = {
             'full': (full['original_logits'].sigmoid().numpy(), cuts['full']),
             'full_basic_inference': (full['masked_logits'].sigmoid().numpy(), cuts['full']),
             'basic': (basic['original_logits'].sigmoid().numpy(), cuts['basic']),
-            'basic_cbm': (bp, cuts['basic_cbm']),
             'mixed_full': (fp, cuts['mixed_cbm']),
             'mixed_basic': (mp, cuts['mixed_cbm'])}
+        if 'basic' in models:
+            _, bp = predict(models['basic'], basic['embedding'])
+            conditions['basic_cbm'] = (bp, cuts['basic_cbm'])
         cohorts.append(dict(task=task, split=split, n=n, positive=int(y.sum()), negative=int(n-y.sum()),
                             prevalence=float(y.mean()), all_positive_f1=float(2*y.sum()/(n+y.sum()))))
         predictions = dict(person_id=basic['person_ids'], y=y)
@@ -92,9 +96,10 @@ def run_analysis(task, cfg, device):
             ('full_input_loss','full','full_basic_inference','downstream'),
             ('basic_vs_full','basic','full','downstream'),
             ('retraining_gain','basic','full_basic_inference','downstream'),
-            ('basic_cbm_gain','basic_cbm','basic','cbm'),
             ('mixed_cbm_gain','mixed_basic','full_basic_inference','cbm'),
             ('mixed_input_loss','mixed_full','mixed_basic','cbm')]
+        if 'basic' in models:
+            definitions.append(('basic_cbm_gain','basic_cbm','basic','cbm'))
         for label, a, b, family in definitions:
             pa, ca = conditions[a]; pb, cb = conditions[b]
             comparisons.append(dict(task=task, split=split, comparison=label, family=family,
@@ -163,4 +168,5 @@ def run_analysis(task, cfg, device):
                        ('restoration',recoveries), ('cohorts',cohorts)]:
         pd.DataFrame(rows).to_csv(out/(name+'.csv'), index=False)
     write_json(out/'DONE.json', dict(task=task, seed=cfg['seed'], bootstrap_samples=cfg['bootstrap_samples'],
-                                   analysis_version=ANALYSIS_VERSION, reported_metrics=['f1','balanced_accuracy','auroc']))
+                                   analysis_version=ANALYSIS_VERSION, cbm_modes=modes,
+                                   reported_metrics=['f1','balanced_accuracy','auroc']))

@@ -61,7 +61,7 @@ def pool(jobs,devices,config,root,after=None):
         selector.close()
 
 def main():
-    p=argparse.ArgumentParser(description='F1/BA six-task study from existing processed inputs/cache.')
+    p=argparse.ArgumentParser(description='Six-task multimodal and CBM study from prepared inputs.')
     p.add_argument('--config',type=Path,default=HERE/'study.yaml')
     p.add_argument('--devices',nargs='+');p.add_argument('--source-root',type=Path)
     p.add_argument('--output-root',type=Path)
@@ -71,6 +71,8 @@ def main():
         if getattr(a,key) is not None:cfg[key]=getattr(a,key)
     for key in ('source_root','output_root','clinical_dir'):
         cfg[key]=str(Path(cfg[key]).expanduser().resolve())
+    if cfg.get('participants_tsv'):
+        cfg['participants_tsv']=str(Path(cfg['participants_tsv']).expanduser().resolve())
     if cfg.get('backbone_root'):
         cfg['backbone_root']=str(Path(cfg['backbone_root']).expanduser().resolve())
         if cfg['backbone_root']==cfg['output_root']:
@@ -110,6 +112,9 @@ def main():
                     prepare(cfg)
                 # These are existing normalized tensors and frozen ResNet features,
                 # not fitted representations from the previous experiment.
+                if not (source/'inputs.json').exists() or not (source/'cache/dimensions.json').exists():
+                    raise FileNotFoundError('Prepared inputs/cache are missing at '+str(source)+
+                        '. Download AI-READI separately, then run prepare_public_inputs.py; see README.md.')
                 read_json(source/'inputs.json');read_json(source/'cache/dimensions.json')
                 if not (root/'labels/DONE.json').exists():
                     from cbm.labels import extract,FOUR_OBSERVATION_FORMS,SURVEY_ADMIN_IDS

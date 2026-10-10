@@ -1,10 +1,11 @@
-# Existing processed inputs + normalized native/ResNet cache. Read-only.
-source_root: /data/pzhao3/ot2_output/six_task_study_v1_20260913
-output_root: /data/pzhao3/ot2_output/ot2_cbm_no_observation_v1_20260923
-# Reuse Full/Basic features; fit both CBMs afresh with the reduced concept bank.
-backbone_root: /data/pzhao3/ot2_output/ot2_f1_study_v1_20260922
+# Run from the repository root. AI-READI data must be obtained separately.
+source_root: outputs/prepared
+output_root: outputs/study_without_observation
+clinical_dir: data/aireadi/clinical_data
 exclude_observation: true
-clinical_dir: /data/EMED/AIREADI/aireadi300/d55855bd-e2fb-4e53-a07f-e5fd3c41707a/dataset/clinical_data
+cbm_modes: [mixed]
+concept_ranking: auroc_mean_plus_2sd
+run_concept_diagnostics: true
 
 devices: [0, 1, 2, 3]
 seed: 42
@@ -24,13 +25,12 @@ cbm_learning_rate: 0.001
 cbm_weight_decay: 0.0001
 concept_lambda: 1.0
 concept_tolerance: 0.1
-
-# Also the number of paired prediction-swap permutations for each p value.
 bootstrap_samples: 10000
+
 tasks:
   - moca_binary
-  - cvd_broad_binary
-  - cvd_strict_binary
+  - cardiovascular_conditions_binary
+  - major_cardiovascular_events_binary
   - osteoporosis_history_binary
   - kidney_history_binary
   - lung_history_binary

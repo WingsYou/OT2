@@ -29,7 +29,11 @@ Thumbs.db
 *~
 
 # Local study inputs and generated experiment directories
-/data/
+/data/*
+!/data/README.md
+!/data/aireadi/
+/data/aireadi/*
+!/data/aireadi/.gitkeep
 /dataset/
 /raw_data/
 /artifacts/
@@ -63,3 +67,39 @@ ot2_cluster_*.tar.gz.sha256
 /configs/TASK_SPECIFIC_CONCEPT_SUBSETS.xlsx
 *.tar.gz
 *.tar.gz.sha256
+
+# Raw patient tables, derived arrays and private exports, wherever placed.
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.parquet
+*.feather
+*.arrow
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.dcm
+*.dicom
+*.dat
+*.hea
+*.zip
+*.tar
+*.7z
+*.pem
+*.key
+/pipeline.local.yaml
+/study.local.yaml
+
+# Public diagrams may be kept explicitly under docs/figures/.
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+!docs/figures/*.png
+!docs/figures/*.jpg
+!docs/figures/*.jpeg

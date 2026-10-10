@@ -33,7 +33,9 @@ def main():
             run_model(a.task,a.variant,cfg,device)
         if device.type=='cuda':torch.cuda.empty_cache()
         from cbm.experiment import run_cbm
-        run_cbm(a.task,'basic' if a.variant=='basic' else 'mixed',cfg,device)
+        mode='basic' if a.variant=='basic' else 'mixed'
+        if mode in cfg.get('cbm_modes',['basic','mixed']):
+            run_cbm(a.task,mode,cfg,device)
 
 
 if __name__=='__main__':main()

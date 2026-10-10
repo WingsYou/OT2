@@ -60,8 +60,10 @@ def auroc_concept_table(rows, task, split):
 def make_report(cfg):
     from analysis import ANALYSIS_VERSION
     root = Path(cfg['output_root']); out = root/'tables'; out.mkdir(exist_ok=True)
+    modes = cfg.get('cbm_modes', ['basic','mixed'])
     completed = [t for t in cfg['tasks'] if (root/t/'analysis/DONE.json').exists()
-                 and read_json(root/t/'analysis/DONE.json').get('analysis_version')==ANALYSIS_VERSION]
+                 and read_json(root/t/'analysis/DONE.json').get('analysis_version')==ANALYSIS_VERSION
+                 and read_json(root/t/'analysis/DONE.json').get('cbm_modes', ['basic','mixed'])==modes]
     if not completed: return
     auroc_top = cfg.get('concept_ranking')=='auroc_mean_plus_2sd'
     frames = {}
@@ -100,8 +102,9 @@ def make_report(cfg):
             f'Completed tasks: {len(completed)}/{len(cfg["tasks"])}. Seed {cfg["seed"]}. '
             f'{cfg["bootstrap_samples"]:,} participant bootstrap resamples. AUROC, positive-class F1 and balanced accuracy (BA).', '',
             'Full and Basic model modality ablations are separate from the CBM experiment. '
-            'Every task uses the same Mixed-CBM removal: nonbasic clinical inputs are withheld, while Basic Clinical and the other eight modalities remain available. '
-            'Basic CBM classification is retained as an additional result; its task-specific top-three restoration analysis is no longer run.', '',
+            'Every task uses the same Mixed-CBM removal: nonbasic clinical inputs are withheld, while Basic Clinical and the other eight modalities remain available.'+
+            (' Basic CBM classification is retained as an additional result; its task-specific top-three restoration analysis is no longer run.'
+             if 'basic' in modes else ''), '',
             'Checkpoint selection and F1 thresholds use validation only. Modality top-three markers are validation-selected descriptive summaries; they do not select CBM removal conditions. '+
             ('Individual Concept IDs are ranked by ΔAUROC within each task/split; displayed IDs exceed the mean + 2 population SD of all finite evaluated individual-ID gains. '
              if auroc_top else 'Concept IDs are ranked within each split by F1 recovery, with tied effects sharing a rank. ')+
@@ -185,10 +188,16 @@ def make_report(cfg):
                      f'{x.restored_f1:.4f} / {x.restored_ba:.4f}',interval(x._asdict(),True),prob(x.p_value),prob(x.q_value),
                      interval(x._asdict(),True,'ba_'),prob(x.ba_p_value),prob(x.ba_q_value),
                      int(x.n_prediction_changes),f'{x.mean_abs_probability_change:.6g}'] for x in z.itertuples()])]
-        lines += ['## Additional results: Basic CBM classification and selected fits', '',
-            md(['Task','Basic Clinical model','Basic Clinical + CBM','Basic CBM selected fit','Mixed CBM selected fit'],
-               [[TASK_LABELS[t],cell(t,'basic'),cell(t,'basic_cbm'),
-                 *[read_json(root/t/(m+'_cbm')/'DONE.json')['selection']['joint']['status'] for m in ('basic','mixed')]] for t in completed]),
+        if 'basic' in modes:
+            lines += ['## Additional results: Basic CBM classification and selected fits', '',
+                md(['Task','Basic Clinical model','Basic Clinical + CBM','Basic CBM selected fit','Mixed CBM selected fit'],
+                   [[TASK_LABELS[t],cell(t,'basic'),cell(t,'basic_cbm'),
+                     *[read_json(root/t/(m+'_cbm')/'DONE.json')['selection']['joint']['status'] for m in ('basic','mixed')]] for t in completed])]
+        else:
+            lines += ['## CBM selected fits', '',
+                md(['Task','Mixed CBM selected fit'],
+                   [[TASK_LABELS[t],read_json(root/t/'mixed_cbm/DONE.json')['selection']['joint']['status']] for t in completed])]
+        lines += [
             '`fitted` denotes a selected joint-tuning epoch; `sequential_fallback` retains the concept-then-head model. '
             'Joint tuning is selected only when validation F1/BCE improves while satisfying the concept-loss tolerance.', '',
             '## Paired model comparisons', '',

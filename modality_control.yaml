@@ -1,6 +1,6 @@
 # Read completed runs to locate their original Full/Basic backbones.
 # No CBM is evaluated or trained by this experiment.
-output_root: /data/pzhao3/ot2_output/ot2_modality_control_20261002
+output_root: outputs/modality_control
 devices: [0, 1, 2, 3]
 cpu_threads: 2
 num_workers: 0
@@ -14,5 +14,5 @@ tasks:
   - kidney_history_binary
   - lung_history_binary
 source_runs:
-  existing_tasks: /data/pzhao3/ot2_output/ot2_cbm_no_observation_v1_20260923
-  cardiovascular_tasks: /data/pzhao3/ot2_output/ot2_cardiovascular_v2_no_observation_20261002
+  existing_tasks: outputs/study_without_observation
+  cardiovascular_tasks: outputs/study_without_observation

@@ -1,5 +1,5 @@
-# Already present in the existing Cluster conda environment "ot2".
-# Preserve its working CUDA PyTorch/torchvision pair; no reinstall is required.
+# Install a compatible CUDA torch/torchvision pair before these requirements.
+# Existing environments can keep their working versions.
 torch
 torchvision
 numpy

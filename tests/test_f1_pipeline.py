@@ -21,6 +21,26 @@ from report import make_report
 
 
 class F1StudyTests(unittest.TestCase):
+    def test_worker_mixed_only_still_trains_basic_backbone(self):
+        import worker
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'config.yaml'
+            for modes in (None, ['mixed']):
+                cfg=dict(cpu_threads=1)
+                if modes is not None:cfg['cbm_modes']=modes
+                path.write_text(yaml.safe_dump(cfg))
+                for variant in ('full','basic'):
+                    with self.subTest(modes=modes,variant=variant), \
+                            patch('sys.argv',['worker.py','--config',str(path),'--task','moca_binary','--variant',variant,'--cpu']), \
+                            patch('train.run_model') as train_model, patch('cbm.experiment.run_cbm') as train_cbm:
+                        worker.main()
+                        train_model.assert_called_once()
+                        if variant=='full' or modes is None:
+                            train_cbm.assert_called_once()
+                            self.assertEqual(train_cbm.call_args.args[1],'mixed' if variant=='full' else 'basic')
+                        else:
+                            train_cbm.assert_not_called()
+
     def test_balancing_threshold_and_paired_statistics(self):
         y=np.array([0]*7+[1]*3);idx=balanced_indices(y,42)
         self.assertEqual(np.bincount(y[idx]).tolist(),[7,7])
@@ -99,7 +119,7 @@ class F1StudyTests(unittest.TestCase):
         with_obs=yaml.safe_load(Path('study_with_observation.yaml').read_text())
         without_obs=yaml.safe_load(Path('study_no_observation.yaml').read_text())
         differences={k for k in set(with_obs)|set(without_obs) if with_obs.get(k)!=without_obs.get(k)}
-        self.assertEqual(differences,{'output_root','exclude_observation'})
+        self.assertEqual(differences,{'output_root','exclude_observation','backbone_root'})
         self.assertFalse(with_obs['exclude_observation'])
 
 
@@ -107,6 +127,11 @@ class F1StudyTests(unittest.TestCase):
     def test_small_end_to_end_both_backbones_and_cbms(self):
         torch.set_num_threads(1);torch.manual_seed(7)
         task='moca_binary';cfg=yaml.safe_load(Path('study.yaml').read_text())
+        # The legacy configuration without cbm_modes continues to fit both CBMs.
+        cfg.pop('cbm_modes',None)
+        cfg.pop('backbone_root',None)
+        cfg['exclude_observation']=False
+        cfg.pop('concept_ranking',None)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'source';out=root/'results'
             (source/'cache/people').mkdir(parents=True);(out/'labels'/task).mkdir(parents=True)
@@ -241,6 +266,23 @@ class F1StudyTests(unittest.TestCase):
             expected=model.task_head(direct).squeeze(-1).sigmoid().numpy()
             np.testing.assert_allclose(restoration_batch(model,masked_z,full_z,[columns])[0],expected,atol=1e-7)
             np.testing.assert_allclose(restoration_batch(model,masked_z,full_z,[list(range(model.spec['width']))])[0],full_p,atol=1e-7)
+            # Public Mixed-only mode needs both backbones but no Basic-CBM files.
+            shutil.move(str(out/task/'basic_cbm'),str(root/'legacy_basic_cbm'))
+            cfg['cbm_modes']=['mixed']
+            run_analysis(task,cfg,torch.device('cpu'))
+            make_report(cfg)
+            self.assertEqual(read_json(analysis/'DONE.json')['cbm_modes'],['mixed'])
+            classification=pd.read_csv(analysis/'classification.csv')
+            self.assertEqual(set(classification.model),{'full','full_basic_inference','basic','mixed_full','mixed_basic'})
+            comparisons=pd.read_csv(analysis/'comparisons.csv')
+            self.assertNotIn('basic_cbm_gain',set(comparisons.comparison))
+            text=(out/'tables/SUMMARY_test.md').read_text()
+            self.assertNotIn('Basic CBM',text)
+            self.assertNotIn('Basic Clinical + CBM',text)
+            self.assertIn('Mixed CBM selected fit',text)
+            self.assertIn('Basic Clinical model',text)
+            with patch('analysis.restore',side_effect=AssertionError('completed Mixed-only analysis must reuse')):
+                run_analysis(task,cfg,torch.device('cpu'))
 
 
 if __name__=='__main__':unittest.main()
