@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from cbm.recovery_report import CONDITIONS, SOURCES, make_recovery_report
-from stats import auroc_selection
+from infosign.cbm.report import CONDITIONS, SOURCES, make_recovery_report
+from infosign.stats import auroc_selection
 
 
 class RecoveryReportTests(unittest.TestCase):

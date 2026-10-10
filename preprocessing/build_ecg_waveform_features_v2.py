@@ -241,7 +241,7 @@ def import_wfdb():
     except Exception as exc:  # pragma: no cover - dependency varies by runtime
         raise ImportError(
             "wfdb is required to read AI-READI .hea/.dat recordings; "
-            "install the 'wfdb' package in the cluster environment"
+            "install the 'wfdb' package in the Python environment"
         ) from exc
     return wfdb
 

@@ -47,7 +47,7 @@ Outputs under ``--out-dir``
     Canonical preprocessing configuration and SHA-256 hash.
 
 PyTorch and pydicom are imported lazily so importing the module for manifest or
-geometry tests does not require the cluster imaging environment.  Running the
+geometry tests does not require the imaging dependencies.  Running the
 preprocessor gives an actionable dependency error when either is unavailable.
 """
 from __future__ import annotations
@@ -232,7 +232,7 @@ def _import_torch() -> Any:
     except Exception as exc:  # pragma: no cover - dependency varies by runtime
         raise ImportError(
             "PyTorch is required to write/read V2 retinal .pt artifacts. "
-            "Install a cluster-compatible torch build before running this script."
+            "Install a compatible torch build before running this script."
         ) from exc
     return torch
 

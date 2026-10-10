@@ -3,11 +3,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from common import REMOVALS, read_json, write_json, backbone_dir
-from train import load, cached_removals
-from stats import PairedF1, f1
-from cbm.model import restore, predict
-from cbm.experiment import concept_id_groups, restoration_batch
+from infosign.common import REMOVALS, read_json, write_json, backbone_dir
+from infosign.train import load, cached_removals
+from infosign.stats import PairedF1, f1
+from infosign.cbm.model import restore, predict
+from infosign.cbm.model import concept_id_groups, restoration_batch
 
 ANALYSIS_VERSION = 5
 

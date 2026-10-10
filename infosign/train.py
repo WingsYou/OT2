@@ -8,10 +8,10 @@ import pandas as pd
 import torch
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from common import MODALITIES, REMOVALS, read_json, write_json, save_torch
-from data import CachedDataset, clinical_inputs, collate, cache_config
-from stats import BalancedSampler, f1, threshold
-from task2_v2_model import Task2V2Model, Task2V2ModelConfig, PresenceAwareFusion, BinaryTaskHead
+from infosign.common import MODALITIES, REMOVALS, read_json, write_json, save_torch
+from infosign.data import CachedDataset, clinical_inputs, collate, cache_config
+from infosign.stats import BalancedSampler, f1, threshold
+from infosign.encoders import Task2V2Model, Task2V2ModelConfig, PresenceAwareFusion, BinaryTaskHead
 
 
 class CachedModel(Task2V2Model):
@@ -169,7 +169,7 @@ class FrozenFusionReadout(torch.nn.Module):
 
 def cached_removals(task, variant, cfg, device, output, source_analysis=None):
     """Reuse existing ablations or compute missing ones without touching the source run."""
-    from common import backbone_dir
+    from infosign.common import backbone_dir
     root = backbone_dir(task, cfg)/variant
     model = None
     results = {}

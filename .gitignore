@@ -30,7 +30,6 @@ Thumbs.db
 
 # Local study inputs and generated experiment directories
 /data/*
-!/data/README.md
 !/data/aireadi/
 /data/aireadi/*
 !/data/aireadi/.gitkeep
@@ -57,7 +56,7 @@ Thumbs.db
 *.log
 events.out.tfevents.*
 
-# Historical cluster distribution archives
+# Historical distribution archives
 ot2_cluster_*.tar.gz
 ot2_cluster_*.tar.gz.sha256
 
@@ -93,6 +92,7 @@ ot2_cluster_*.tar.gz.sha256
 *.key
 /pipeline.local.yaml
 /study.local.yaml
+/config.local.yaml
 
 # Public diagrams may be kept explicitly under docs/figures/.
 *.png

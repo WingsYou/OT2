@@ -14,13 +14,36 @@ import yaml
 HERE=Path(__file__).resolve().parent
 
 def make_reports(cfg, concepts_only=False):
-    from report import make_report
-    from cbm.diagnostics_report import make_diagnostics_report
-    from cbm.recovery_report import make_recovery_report
+    from infosign.report import make_report
+    from infosign.cbm.report import make_diagnostics_report, make_recovery_report
     if not concepts_only:
         make_report(cfg)
     make_diagnostics_report(cfg)
     make_recovery_report(cfg)
+
+def run_worker(cfg, task, phase, cpu=False):
+    """Execute one scheduled job on its assigned visible GPU."""
+    for key in ('OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'):
+        os.environ[key]=str(cfg['cpu_threads'])
+    import torch
+    torch.set_num_threads(cfg['cpu_threads'])
+    torch.set_float32_matmul_precision('high')
+    device=torch.device('cpu' if cpu else 'cuda:0')
+    if device.type=='cuda':torch.backends.cudnn.benchmark=True
+    if phase=='concept-diagnostics':
+        from infosign.cbm.diagnostics import run_diagnostics
+        run_diagnostics(task,cfg,device)
+    elif phase=='analyze':
+        from infosign.analysis import run_analysis
+        run_analysis(task,cfg,device)
+    else:
+        from infosign.train import run_model
+        if not cfg.get('backbone_root'):
+            run_model(task,phase,cfg,device)
+        if device.type=='cuda':torch.cuda.empty_cache()
+        if phase=='full':
+            from infosign.cbm.model import run_cbm
+            run_cbm(task,cfg,device)
 
 def pool(jobs,devices,config,root,after=None):
     waiting=list(jobs);free=list(map(str,devices));running={};failed=[];selector=selectors.DefaultSelector()
@@ -28,7 +51,7 @@ def pool(jobs,devices,config,root,after=None):
     def launch(job,gpu):
         name,args=job;env=os.environ.copy();cpu=gpu=='cpu'
         if not cpu:env['CUDA_VISIBLE_DEVICES']=visible.split(',')[int(gpu)] if visible else gpu
-        command=[sys.executable,'-u',str(HERE/'worker.py'),'--config',str(config),*args]+(['--cpu'] if cpu else [])
+        command=[sys.executable,'-u',str(HERE/'run.py'),'--config',str(config),*args]+(['--cpu'] if cpu else [])
         log=(root/'logs'/(name+'.log')).open('ab',buffering=0)
         proc=subprocess.Popen(command,cwd=HERE,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
                               bufsize=0,start_new_session=True)
@@ -71,11 +94,19 @@ def pool(jobs,devices,config,root,after=None):
 
 def main():
     p=argparse.ArgumentParser(description='Six-task multimodal and CBM study from prepared inputs.')
-    p.add_argument('--config',type=Path,default=HERE/'study.yaml')
+    p.add_argument('--config',type=Path,default=HERE/'config.yaml')
     p.add_argument('--devices',nargs='+');p.add_argument('--source-root',type=Path)
     p.add_argument('--output-root',type=Path)
     p.add_argument('--stage',choices=('all','train','analyze','report','concept-diagnostics','concept-diagnostics-report'),default='all')
-    a=p.parse_args();cfg=yaml.safe_load(a.config.read_text())
+    p.add_argument('--worker',choices=('full','basic','analyze','concept-diagnostics'),help=argparse.SUPPRESS)
+    p.add_argument('--task',help=argparse.SUPPRESS)
+    p.add_argument('--cpu',action='store_true',help=argparse.SUPPRESS)
+    a=p.parse_args();settings=yaml.safe_load(a.config.read_text())
+    cfg=settings.get('study',settings)
+    if a.worker:
+        if not a.task:p.error('--worker requires --task')
+        run_worker(cfg,a.task,a.worker,a.cpu)
+        return
     for key in ('source_root','output_root','devices'):
         if getattr(a,key) is not None:cfg[key]=getattr(a,key)
     for key in ('source_root','output_root','clinical_dir'):
@@ -89,8 +120,8 @@ def main():
     if root==source:raise ValueError('Use separate prepared-input and experiment output directories.')
     root.mkdir(parents=True,exist_ok=True);(root/'logs').mkdir(exist_ok=True)
     for key in ('OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'):os.environ[key]=str(cfg['cpu_threads'])
-    from common import read_json,write_json
-    from report import make_report
+    from infosign.common import read_json,write_json
+    from infosign.report import make_report
     diagnostics = a.stage in ('concept-diagnostics','concept-diagnostics-report')
     runtime=root/'runtime.yaml'
     if runtime.exists():
@@ -114,19 +145,19 @@ def main():
                 # not fitted representations from the previous experiment.
                 if not (source/'inputs.json').exists() or not (source/'cache/dimensions.json').exists():
                     raise FileNotFoundError('Prepared inputs/cache are missing at '+str(source)+
-                        '. Download AI-READI separately, then run prepare_public_inputs.py; see README.md.')
+                        '. Download AI-READI separately, then run prepare.py; see README.md.')
                 read_json(source/'inputs.json');read_json(source/'cache/dimensions.json')
                 if not (root/'labels/DONE.json').exists():
-                    from cbm.labels import extract,FOUR_OBSERVATION_FORMS,SURVEY_ADMIN_IDS
+                    from infosign.cbm.labels import extract,FOUR_OBSERVATION_FORMS,SURVEY_ADMIN_IDS
                     extract(cfg['clinical_dir'],root/'labels',observation_forms=() if cfg.get('exclude_observation') else FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS,tasks=cfg['tasks'])
                     write_json(root/'labels/DONE.json',dict(clinical_dir=cfg['clinical_dir']))
-                jobs=[(task+'_'+variant,['--task',task,'--variant',variant]) for task in cfg['tasks'] for variant in ('full','basic')]
+                jobs=[(task+'_'+variant,['--task',task,'--worker',variant]) for task in cfg['tasks'] for variant in ('full','basic')]
                 pool(jobs,cfg['devices'],runtime,root)
             if a.stage in ('all','analyze'):
-                jobs=[(task+'_analysis',['--task',task,'--analyze']) for task in cfg['tasks']]
+                jobs=[(task+'_analysis',['--task',task,'--worker','analyze']) for task in cfg['tasks']]
                 pool(jobs,cfg['devices'],runtime,root,after=lambda:make_report(cfg))
             if diagnostics or a.stage in ('all','analyze'):
-                jobs=[(task+'_concept_diagnostics',['--task',task,'--concept-diagnostics']) for task in cfg['tasks']]
+                jobs=[(task+'_concept_diagnostics',['--task',task,'--worker','concept-diagnostics']) for task in cfg['tasks']]
                 pool(jobs,cfg['devices'],runtime,root,after=lambda:make_reports(cfg,concepts_only=True))
             status['status']='complete';write_json(status_path,status)
             make_reports(cfg,concepts_only=diagnostics)

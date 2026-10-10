@@ -1,13 +1,9 @@
 """Study definitions, paths, and small output helpers."""
 from pathlib import Path
 import json
-import sys
 import torch
-import yaml
 
-HERE=Path(__file__).resolve().parent
-sys.path.insert(0,str(HERE/'vendor'))
-from task2_v2_model import PRIMARY_MODALITY_GROUPS as MODALITIES
+from infosign.encoders import PRIMARY_MODALITY_GROUPS as MODALITIES
 
 TASK_LABELS={'moca_binary':'MoCA < 26','cvd_broad_binary':'CVD broad','cvd_strict_binary':'CVD strict',
  'cardiovascular_conditions_binary':'Broad cardiovascular conditions',
@@ -34,8 +30,20 @@ def save_torch(path,data):
 def save_csv(path,frame):
     path=Path(path);temp=path.with_suffix('.csv.tmp');frame.to_csv(temp,index=False);temp.replace(path)
 def original_config(task,cfg):
-    data=yaml.safe_load((HERE/'configs'/(FULL_CONFIGS[task]+'_full.yaml')).read_text())
-    return json.loads(json.dumps(data).replace('{artifact_root}',str(cfg['artifact_root'])))
+    root=Path(cfg['artifact_root'])
+    return {'dataset': {
+        'task': task, 'artifact_root': str(root),
+        'master_csv': str(root/f'model_full_assets_v1/inputs/master_{task}.csv'),
+        'master_metadata_json': str(root/f'model_full_assets_v1/inputs/master_{task}.metadata.json'),
+        'scaler_json': str(root/f'scalers/train_scalers_{task}.json'),
+        'clinical_schema_json': str(root/f'clinical/{task}/clinical_schema_{task}.json'),
+        'environment_schema_json': str(root/'environment_v4/environment_5min_schema.json'),
+        'wearable_schema_json': str(root/'wearable_v5/wearable_5min_schema.json'),
+        'ecg_schema_json': str(root/'ecg/ecg_schema.json'),
+        'strict_lineage': True, 'allow_missing_modalities': True,
+        'retinal': {'deterministic_selection': True,
+                    'max_assets': {'photography':6, 'oct':2, 'octa':16, 'flio':4}}
+    }}
 
 def backbone_dir(task,cfg):
     """Read frozen multimodal outputs from this run or an explicitly reused run."""

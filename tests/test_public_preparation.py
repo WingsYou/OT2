@@ -7,17 +7,17 @@ import unittest
 import pandas as pd
 import yaml
 
-from prepare_public_inputs import HERE, load_config, make_cache_index
+from prepare import HERE, load_config, make_cache_index
 
 
 class PublicPreparationTest(unittest.TestCase):
     def test_relative_paths_and_dataset_template(self):
         with tempfile.TemporaryDirectory() as tmp:
-            config = Path(tmp) / 'pipeline.yaml'
-            config.write_text(yaml.safe_dump(dict(
+            config = Path(tmp) / 'config.yaml'
+            config.write_text(yaml.safe_dump(dict(preprocessing=dict(
                 dataset_root='data/example', prepared_root='outputs/native',
                 source_root='outputs/prepared',
-                manifests={'ecg': '{dataset_root}/cardiac_ecg/manifest.tsv'})))
+                manifests={'ecg': '{dataset_root}/cardiac_ecg/manifest.tsv'}))))
             settings = load_config(config)
             self.assertEqual(settings['participants'], str(HERE / 'data/example/participants.tsv'))
             self.assertEqual(settings['manifests']['ecg'], str(HERE / 'data/example/cardiac_ecg/manifest.tsv'))

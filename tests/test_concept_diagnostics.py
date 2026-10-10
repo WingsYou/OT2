@@ -7,13 +7,13 @@ import numpy as np
 import pandas as pd
 import torch
 from sklearn.metrics import brier_score_loss, f1_score, balanced_accuracy_score, roc_auc_score
-from stats import PairedF1, auroc, auroc_selection
-from common import read_json, save_torch, write_json
-from cbm.model import IndividualCBM, state
-from cbm.experiment import concept_id_groups, restoration_batch
-from cbm.diagnostics import (DIAGNOSTIC_FILES, measured_targets, concept_quality, run_diagnostics,
+from infosign.stats import PairedF1, auroc, auroc_selection
+from infosign.common import read_json, save_torch, write_json
+from infosign.cbm.model import IndividualCBM, state
+from infosign.cbm.model import concept_id_groups, restoration_batch
+from infosign.cbm.diagnostics import (DIAGNOSTIC_FILES, measured_targets, concept_quality, run_diagnostics,
                              supplementation_statistics, VERSION)
-from cbm.diagnostics_report import make_diagnostics_report
+from infosign.cbm.report import make_diagnostics_report
 
 
 def specification():
@@ -45,14 +45,14 @@ class ConceptDiagnosticsTests(unittest.TestCase):
             done=dict(version=VERSION,task=task,seed=42,bootstrap_samples=10000,threshold=.61,training=False)
             write_json(folder/'DONE.json',done)
             before=(folder/'DONE.json').read_bytes()
-            with patch('cbm.model.fit',side_effect=AssertionError('must not train')), \
-                 patch('cbm.diagnostics.load',side_effect=AssertionError('must not load checkpoint')):
+            with patch('infosign.cbm.model.fit',side_effect=AssertionError('must not train')), \
+                 patch('infosign.cbm.diagnostics.load',side_effect=AssertionError('must not load checkpoint')):
                 run_diagnostics(task,cfg,torch.device('cpu'))
                 run_diagnostics(task,cfg,torch.device('cpu'))
             self.assertEqual((folder/'DONE.json').read_bytes(),before)
             self.assertEqual(read_json(folder/'DONE.json')['threshold'],.61)
             changed={**cfg,'bootstrap_samples':100}
-            with patch('cbm.diagnostics.load',side_effect=AssertionError('requires inference')):
+            with patch('infosign.cbm.diagnostics.load',side_effect=AssertionError('requires inference')):
                 with self.assertRaisesRegex(AssertionError,'requires inference'):
                     run_diagnostics(task,changed,torch.device('cpu'))
             self.assertFalse((folder/'DONE.json').exists())
@@ -160,7 +160,7 @@ class ConceptDiagnosticsTests(unittest.TestCase):
                 save_torch(root/task/'mixed_cbm/model.pt',dict(spec=spec,states={'joint':state(model)},threshold=.55))
                 folder=root/'labels'/task;folder.mkdir(parents=True)
                 pd.DataFrame(records).to_csv(folder/'labels.csv',index=False)
-                with patch('cbm.model.fit',side_effect=AssertionError('must not train')):
+                with patch('infosign.cbm.model.fit',side_effect=AssertionError('must not train')):
                     run_diagnostics(task,cfg,torch.device('cpu'))
                 make_diagnostics_report(cfg)
                 self.assertFalse((root/task/'analysis').exists())
@@ -190,7 +190,7 @@ class ConceptDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(len(ranked),len(concept_id_groups(spec['items'])))
                 self.assertEqual(ranked.auroc_selection_n.iloc[0],len(ranked))
                 np.testing.assert_array_equal(ranked.auroc_selected,ranked.auroc_gain>ranked.auroc_selection_cutoff)
-                with patch('cbm.diagnostics.load',side_effect=AssertionError('must reuse')):
+                with patch('infosign.cbm.diagnostics.load',side_effect=AssertionError('must reuse')):
                     run_diagnostics(task,cfg,torch.device('cpu'))
 
 

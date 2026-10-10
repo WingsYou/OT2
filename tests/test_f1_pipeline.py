@@ -8,36 +8,32 @@ import pandas as pd
 import torch
 import yaml
 from sklearn.metrics import f1_score, balanced_accuracy_score
-from common import MODALITIES, REMOVALS, read_json, write_json, save_torch
-from stats import balanced_indices, f1, threshold, PairedF1, bh_adjust
-from train import run_model, load
-from data import SOURCE_FLAG_BY_GROUP
-from task2_v2_model import Task2V2ModelConfig
-from cbm.labels import load_bank, SURVEY_ADMIN_IDS
-from cbm.experiment import run_cbm, concept_id_groups, restoration_batch
-from cbm.model import restore, predict
-from analysis import run_analysis, restoration_details, ANALYSIS_VERSION
-from report import make_report
+from infosign.common import MODALITIES, REMOVALS, read_json, write_json, save_torch
+from infosign.stats import balanced_indices, f1, threshold, PairedF1, bh_adjust
+from infosign.train import run_model, load, cached_removals
+from infosign.data import SOURCE_FLAG_BY_GROUP
+from infosign.encoders import Task2V2ModelConfig
+from infosign.cbm.labels import load_bank, SURVEY_ADMIN_IDS
+from infosign.cbm.model import run_cbm, concept_id_groups, restoration_batch
+from infosign.cbm.model import restore, predict
+from infosign.analysis import run_analysis, restoration_details, ANALYSIS_VERSION
+from infosign.report import make_report
 
 
 class F1StudyTests(unittest.TestCase):
     def test_worker_mixed_only_still_trains_basic_backbone(self):
-        import worker
-        with tempfile.TemporaryDirectory() as tmp:
-            path=Path(tmp)/'config.yaml'
-            cfg=dict(cpu_threads=1)
-            path.write_text(yaml.safe_dump(cfg))
-            for variant in ('full','basic'):
-                with self.subTest(variant=variant), \
-                        patch('sys.argv',['worker.py','--config',str(path),'--task','moca_binary','--variant',variant,'--cpu']), \
-                        patch('train.run_model') as train_model, patch('cbm.experiment.run_cbm') as train_cbm:
-                    worker.main()
-                    train_model.assert_called_once()
-                    if variant=='full':
-                        train_cbm.assert_called_once()
-                        self.assertEqual(train_cbm.call_args.args[:2],('moca_binary',cfg))
-                    else:
-                        train_cbm.assert_not_called()
+        from run import run_worker
+        cfg=dict(cpu_threads=1)
+        for variant in ('full','basic'):
+            with self.subTest(variant=variant), \
+                    patch('infosign.train.run_model') as train_model, \
+                    patch('infosign.cbm.model.run_cbm') as train_cbm:
+                run_worker(cfg,'moca_binary',variant,cpu=True)
+                train_model.assert_called_once_with('moca_binary',variant,cfg,torch.device('cpu'))
+                if variant=='full':
+                    train_cbm.assert_called_once_with('moca_binary',cfg,torch.device('cpu'))
+                else:
+                    train_cbm.assert_not_called()
 
     def test_balancing_threshold_and_paired_statistics(self):
         y=np.array([0]*7+[1]*3);idx=balanced_indices(y,42)
@@ -85,7 +81,7 @@ class F1StudyTests(unittest.TestCase):
         self.assertEqual([x['n_prediction_changes'] for x in d],[0,0,0,2])
 
     def test_approved_inventory(self):
-        cfg=yaml.safe_load(Path('study.yaml').read_text())
+        cfg=yaml.safe_load(Path('config.yaml').read_text())['study']
         self.assertTrue(cfg['exclude_observation'])
         bank=load_bank(observation_forms=(),excluded_ids=SURVEY_ADMIN_IDS)
         counts={'moca_binary':109,'cardiovascular_conditions_binary':107,
@@ -113,7 +109,7 @@ class F1StudyTests(unittest.TestCase):
 
     def test_small_end_to_end_both_backbones_and_mixed_cbm(self):
         torch.set_num_threads(1);torch.manual_seed(7)
-        task='moca_binary';cfg=yaml.safe_load(Path('study.yaml').read_text())
+        task='moca_binary';cfg=yaml.safe_load(Path('config.yaml').read_text())['study']
         cfg.pop('backbone_root',None)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'source';out=root/'results'
@@ -150,7 +146,7 @@ class F1StudyTests(unittest.TestCase):
             schema=dict(inventory_ids=12,concepts=[dict(name='c'+str(i),concept_id=str(100+i//2) if i<2 else str(100+i),
                 source_field='field'+str(i),concept_name='Concept '+str(i),field_types=['text'],unit='',domain='Measurement') for i in range(13)])
             write_json(out/'labels'/task/'schema.json',schema)
-            with patch('train.clinical_inputs',return_value=inputs),patch('train.cache_config',side_effect=small_config):
+            with patch('infosign.train.clinical_inputs',return_value=inputs),patch('infosign.train.cache_config',side_effect=small_config):
                 for variant in ('full','basic'):
                     run_model(task,variant,cfg,torch.device('cpu'))
                     info=read_json(out/task/variant/'TRAINING_DONE.json')
@@ -168,7 +164,7 @@ class F1StudyTests(unittest.TestCase):
             expected_full={split:load(out/task/'full'/f'removals_{split}.pt') for split in ('val','test')}
             for split in ('val','test'):(out/task/'full'/f'removals_{split}.pt').unlink()
             write_json(out/task/'analysis/DONE.json',dict(restoration_version=2,reported_metrics=['f1','balanced_accuracy']))
-            with patch('train.CachedDataset',side_effect=AssertionError('must not read raw tensors')):
+            with patch('infosign.train.CachedDataset',side_effect=AssertionError('must not read raw tensors')):
                 run_analysis(task,cfg,torch.device('cpu'))
             make_report(cfg)
             analysis=out/task/'analysis'
@@ -177,7 +173,7 @@ class F1StudyTests(unittest.TestCase):
                 for source_name in REMOVALS:
                     np.testing.assert_allclose(actual[source_name]['probability'],expected_full[split][source_name]['probability'],atol=1e-7)
             self.assertEqual(read_json(analysis/'DONE.json')['analysis_version'],ANALYSIS_VERSION)
-            with patch('analysis.restore',side_effect=AssertionError('completed analysis must reuse')):
+            with patch('infosign.analysis.restore',side_effect=AssertionError('completed analysis must reuse')):
                 run_analysis(task,cfg,torch.device('cpu'))
             selection=read_json(analysis/'SELECTION.json')
             self.assertEqual(set(selection['top_modalities']),{'full','basic'})
@@ -232,7 +228,7 @@ class F1StudyTests(unittest.TestCase):
             for variant in ('full','basic'):shutil.move(str(out/task/variant),str(reused/task/variant))
             cfg['backbone_root']=str(reused)
             (analysis/'DONE.json').unlink()
-            with patch('analysis.cached_removals',wraps=__import__('train').cached_removals):
+            with patch('infosign.analysis.cached_removals',wraps=cached_removals):
                 run_analysis(task,cfg,torch.device('cpu'))
             cfg['exclude_observation']=True; make_report(cfg)
             self.assertIn('all Observation-domain concepts excluded',(out/'tables/SUMMARY_test.md').read_text())
@@ -254,9 +250,9 @@ class F1StudyTests(unittest.TestCase):
             self.assertNotIn('Basic Clinical + CBM',text)
             self.assertIn('Mixed CBM selected fit',text)
             self.assertIn('Basic Clinical model',text)
-            with patch('analysis.restore',side_effect=AssertionError('completed Mixed-only analysis must reuse')):
+            with patch('infosign.analysis.restore',side_effect=AssertionError('completed Mixed-only analysis must reuse')):
                 run_analysis(task,cfg,torch.device('cpu'))
-            from cbm.diagnostics import run_diagnostics
+            from infosign.cbm.diagnostics import run_diagnostics
             from run import make_reports
             run_diagnostics(task,cfg,torch.device('cpu'))
             make_reports(cfg)

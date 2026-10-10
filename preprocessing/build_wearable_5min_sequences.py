@@ -46,7 +46,7 @@ except ImportError:  # Pure aggregation helpers/tests do not require serializati
 
 try:
     from tqdm.auto import tqdm
-except Exception:  # pragma: no cover - tqdm is optional on clusters
+except Exception:  # pragma: no cover - tqdm is optional
     tqdm = None
 
 try:

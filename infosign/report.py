@@ -2,8 +2,8 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from common import TASK_LABELS, INPUT_LABELS, read_json
-from stats import bh_adjust, auroc_selection
+from infosign.common import TASK_LABELS, INPUT_LABELS, read_json
+from infosign.stats import bh_adjust, auroc_selection
 
 MODEL_NAMES = {'full':'Full Clinical model', 'full_basic_inference':'Full model: Basic Clinical at inference',
                'basic':'Basic Clinical model',
@@ -58,7 +58,7 @@ def auroc_concept_table(rows, task, split):
 
 
 def make_report(cfg):
-    from analysis import ANALYSIS_VERSION
+    from infosign.analysis import ANALYSIS_VERSION
     root = Path(cfg['output_root']); out = root/'tables'; out.mkdir(exist_ok=True)
     completed = [t for t in cfg['tasks'] if (root/t/'analysis/DONE.json').exists()
                  and read_json(root/t/'analysis/DONE.json').get('analysis_version')==ANALYSIS_VERSION]

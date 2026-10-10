@@ -8,11 +8,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from common import backbone_dir, read_json, write_json
-from train import load
-from stats import PairedF1
-from cbm.model import encode, predict, restore
-from cbm.experiment import concept_id_groups, restoration_batch
+from infosign.common import backbone_dir, read_json, write_json
+from infosign.train import load
+from infosign.stats import PairedF1
+from infosign.cbm.model import encode, predict, restore
+from infosign.cbm.model import concept_id_groups, restoration_batch
 
 VERSION = 2
 METRICS = {'f1': 'f1', 'ba': 'balanced_accuracy', 'brier': 'brier', 'auroc': 'auroc'}

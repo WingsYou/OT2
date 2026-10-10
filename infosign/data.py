@@ -5,12 +5,12 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset,DataLoader,Subset
-from common import (MODALITIES,FULL_CONFIGS,BASIC_KEYS,HISTORY_TARGETS,original_config,
+from infosign.common import (MODALITIES,FULL_CONFIGS,BASIC_KEYS,HISTORY_TARGETS,original_config,
                     read_json,write_json,save_torch)
-from task2_v2_dataset import (OT2V2Dataset,FrozenScalerGroup,SOURCE_FLAG_BY_GROUP,
+from infosign.native_data import (OT2V2Dataset,FrozenScalerGroup,SOURCE_FLAG_BY_GROUP,
                             RETINAL_GROUPS,_pad_temporal)
-from task2_v2_model import Task2V2ModelConfig,build_retinal_backbone
-from artifact_helpers import as_person_id
+from infosign.encoders import Task2V2ModelConfig,build_retinal_backbone
+from infosign.native_data import as_person_id
 
 def people_csv(path):return pd.read_csv(path,dtype={'person_id':str},keep_default_na=False)
 

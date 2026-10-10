@@ -8,8 +8,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parents[1]
-BANK = HERE / 'configs/task_specific_concepts.json'
+BANK = Path(__file__).with_name('concepts.json')
 FOUR_OBSERVATION_FORMS = (
     'px_food_insecurity_survey',
     'px_neighborhood_environment_survey',
