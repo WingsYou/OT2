@@ -7,6 +7,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# Local development checks; omitted from the public repository.
+/tests/
 .ipynb_checkpoints/
 .coverage
 htmlcov/
