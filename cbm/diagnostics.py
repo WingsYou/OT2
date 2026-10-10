@@ -5,11 +5,9 @@ All target encodings come from the existing Mixed-CBM checkpoint.
 """
 from collections import defaultdict
 from pathlib import Path
-import shutil
 import numpy as np
 import pandas as pd
 import torch
-import yaml
 from common import backbone_dir, read_json, write_json
 from train import load
 from stats import PairedF1
@@ -22,33 +20,13 @@ DIAGNOSTIC_FILES = tuple(name+'.csv' for name in ('quality','performance','compa
     f'measured_{kind}_{split}.csv' for split in ('val','test') for kind in ('predictions','availability'))
 
 
-def resolve_diagnostic_config(task, cfg):
-    """Route a task to its frozen source run while keeping outputs separate."""
-    if not cfg.get('diagnostic_sources'):
-        return cfg
-    source = Path(cfg['diagnostic_sources'][task]).expanduser().resolve()
-    saved = yaml.safe_load((source/'runtime.yaml').read_text())
-    if task not in saved['tasks']:
-        raise ValueError(f'{task} is not in the saved source run {source}')
-    if bool(saved.get('exclude_observation')) != bool(cfg.get('exclude_observation')):
-        raise ValueError(f'Observation bank differs for {task}: {source}')
-    if Path(cfg['output_root']).expanduser().resolve() == source:
-        raise ValueError('Use a separate output_root for the concept recovery report')
-    resolved = {**saved, **cfg}
-    resolved['cbm_source_root'] = str(source)
-    resolved['backbone_root'] = str(Path(saved.get('backbone_root') or source).expanduser().resolve())
-    return resolved
-
-
-def completed_diagnostics(folder, task, cfg, destination=False):
+def completed_diagnostics(folder, task, cfg):
     marker = folder/'DONE.json'
     if not marker.exists() or not all((folder/name).is_file() for name in DIAGNOSTIC_FILES):
         return None
     done = read_json(marker)
     expected = dict(version=VERSION,task=task,seed=cfg['seed'],
                     bootstrap_samples=cfg['bootstrap_samples'],training=False)
-    if destination and cfg.get('cbm_source_root'):
-        expected.update(cbm_source_root=cfg['cbm_source_root'],backbone_root=cfg['backbone_root'])
     return done if all(done.get(key)==value for key,value in expected.items()) else None
 
 
@@ -174,21 +152,11 @@ def restore_ids(model, missing, reference, groups):
 
 def run_diagnostics(task, cfg, device):
     root = Path(cfg['output_root'])/task
-    source_root = Path(cfg.get('cbm_source_root') or cfg['output_root'])
+    source_root = Path(cfg['output_root'])
     out = root/'concept_diagnostics'; out.mkdir(parents=True,exist_ok=True)
-    if completed_diagnostics(out,task,cfg,destination=True):
+    if completed_diagnostics(out,task,cfg):
         print(f'[reuse diagnostics] {task}',flush=True); return
     (out/'DONE.json').unlink(missing_ok=True)
-    source = source_root/task/'concept_diagnostics'
-    if source.resolve() != out.resolve():
-        done = completed_diagnostics(source,task,cfg)
-        if done:
-            for name in DIAGNOSTIC_FILES:
-                shutil.copy2(source/name,out/name)
-            done.update(cbm_source_root=str(source_root),backbone_root=cfg['backbone_root'],
-                        exclude_observation=bool(cfg.get('exclude_observation')),reused_from=str(source))
-            write_json(out/'DONE.json',done)
-            print(f'[reuse source diagnostics] {task}: {source}',flush=True); return
     backbone = backbone_dir(task,cfg)/'full'
     artifact = load(source_root/task/'mixed_cbm/model.pt'); model = restore(artifact,device)
     torch.set_float32_matmul_precision('highest')

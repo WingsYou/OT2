@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-command, four-GPU fitting and val/test tables; no raw preprocessing."""
+"""Run Full/Basic models, their ablations, and Mixed-CBM concept interventions."""
 import argparse
 import fcntl
 import os
@@ -12,6 +12,15 @@ import time
 import yaml
 
 HERE=Path(__file__).resolve().parent
+
+def make_reports(cfg, concepts_only=False):
+    from report import make_report
+    from cbm.diagnostics_report import make_diagnostics_report
+    from cbm.recovery_report import make_recovery_report
+    if not concepts_only:
+        make_report(cfg)
+    make_diagnostics_report(cfg)
+    make_recovery_report(cfg)
 
 def pool(jobs,devices,config,root,after=None):
     waiting=list(jobs);free=list(map(str,devices));running={};failed=[];selector=selectors.DefaultSelector()
@@ -71,26 +80,18 @@ def main():
         if getattr(a,key) is not None:cfg[key]=getattr(a,key)
     for key in ('source_root','output_root','clinical_dir'):
         cfg[key]=str(Path(cfg[key]).expanduser().resolve())
-    if cfg.get('participants_tsv'):
-        cfg['participants_tsv']=str(Path(cfg['participants_tsv']).expanduser().resolve())
     if cfg.get('backbone_root'):
         cfg['backbone_root']=str(Path(cfg['backbone_root']).expanduser().resolve())
         if cfg['backbone_root']==cfg['output_root']:
             raise ValueError('Choose a separate output-root for the new CBMs.')
-    if cfg.get('prepare_cardiovascular_tasks'):
-        cfg['prepared_inputs_root']=str(Path(cfg.get('prepared_inputs_root') or
-            Path(cfg['output_root'])/'prepared_inputs').expanduser().resolve())
     cfg['devices']=list(map(str,cfg['devices']))
     root=Path(cfg['output_root']);source=Path(cfg['source_root'])
-    if root==source:raise ValueError('Use a new output directory for the F1 rerun; source_root is read-only.')
+    if root==source:raise ValueError('Use separate prepared-input and experiment output directories.')
     root.mkdir(parents=True,exist_ok=True);(root/'logs').mkdir(exist_ok=True)
     for key in ('OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS'):os.environ[key]=str(cfg['cpu_threads'])
     from common import read_json,write_json
     from report import make_report
     diagnostics = a.stage in ('concept-diagnostics','concept-diagnostics-report')
-    if diagnostics:
-        from cbm.diagnostics_report import make_diagnostics_report
-    reporter = make_diagnostics_report if diagnostics else make_report
     runtime=root/'runtime.yaml'
     if runtime.exists():
         previous=yaml.safe_load(runtime.read_text())
@@ -98,7 +99,9 @@ def main():
         resources=('devices','num_workers','cpu_threads')
         if {k:v for k,v in previous.items() if k not in resources}!={k:v for k,v in cfg.items() if k not in resources}:
             raise ValueError('Settings differ from this output. Use its runtime.yaml or choose a new output-root.')
-    if a.stage in ('report','concept-diagnostics-report'):reporter(cfg);return
+    if a.stage in ('report','concept-diagnostics-report'):
+        make_reports(cfg,concepts_only=diagnostics)
+        return
     with (root/'.run.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise RuntimeError('A process is already using this output directory') from None
@@ -107,9 +110,6 @@ def main():
         status=dict(status='running',stage=a.stage,tasks=cfg['tasks']);write_json(status_path,status)
         try:
             if a.stage in ('all','train'):
-                if cfg.get('prepare_cardiovascular_tasks') and not cfg.get('backbone_root'):
-                    from prepare_cardiovascular_inputs import prepare
-                    prepare(cfg)
                 # These are existing normalized tensors and frozen ResNet features,
                 # not fitted representations from the previous experiment.
                 if not (source/'inputs.json').exists() or not (source/'cache/dimensions.json').exists():
@@ -125,17 +125,14 @@ def main():
             if a.stage in ('all','analyze'):
                 jobs=[(task+'_analysis',['--task',task,'--analyze']) for task in cfg['tasks']]
                 pool(jobs,cfg['devices'],runtime,root,after=lambda:make_report(cfg))
-            if diagnostics:
+            if diagnostics or a.stage in ('all','analyze'):
                 jobs=[(task+'_concept_diagnostics',['--task',task,'--concept-diagnostics']) for task in cfg['tasks']]
-                pool(jobs,cfg['devices'],runtime,root,after=lambda:reporter(cfg))
-            elif a.stage=='all' and cfg.get('run_concept_diagnostics'):
-                from cbm.diagnostics_report import make_diagnostics_report
-                jobs=[(task+'_concept_diagnostics',['--task',task,'--concept-diagnostics']) for task in cfg['tasks']]
-                pool(jobs,cfg['devices'],runtime,root,after=lambda:make_diagnostics_report(cfg))
-            status['status']='complete';write_json(status_path,status);reporter(cfg)
+                pool(jobs,cfg['devices'],runtime,root,after=lambda:make_reports(cfg,concepts_only=True))
+            status['status']='complete';write_json(status_path,status)
+            make_reports(cfg,concepts_only=diagnostics)
         except BaseException as exc:
             status.update(status='failed',error=str(exc));write_json(status_path,status);raise
-    print(('CONCEPT_DIAGNOSTICS_COMPLETE: ' if diagnostics else 'F1_STUDY_COMPLETE: ')+
+    print(('CONCEPT_DIAGNOSTICS_COMPLETE: ' if diagnostics else 'STUDY_COMPLETE: ')+
           str(root/('tables/concept_diagnostics' if diagnostics else 'tables')),flush=True)
 
 if __name__=='__main__':main()

@@ -3,9 +3,6 @@ source_root: outputs/prepared
 output_root: outputs/study_without_observation
 clinical_dir: data/aireadi/clinical_data
 exclude_observation: true
-cbm_modes: [mixed]
-concept_ranking: auroc_mean_plus_2sd
-run_concept_diagnostics: true
 
 devices: [0, 1, 2, 3]
 seed: 42

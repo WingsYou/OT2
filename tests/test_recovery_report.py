@@ -50,7 +50,7 @@ class RecoveryReportTests(unittest.TestCase):
                     rows.append(dict(rows[0], task='kidney_history_binary', auroc_selected=True))
                     pd.DataFrame(rows).to_csv(diagnostics/f'{legacy}_{split}.csv', index=False)
             cfg = dict(output_root=str(root), tasks=[task], seed=42, bootstrap_samples=10000,
-                       exclude_observation=True, concept_ranking='auroc_mean_plus_2sd')
+                       exclude_observation=True)
             make_recovery_report(cfg)
             for split in ('val', 'test'):
                 for source, prefix, _, legacy in SOURCES:
@@ -76,7 +76,7 @@ class RecoveryReportTests(unittest.TestCase):
                 self.assertIn('12 / 7 / 20', summary)
                 self.assertIn('Example 9', summary)
                 self.assertNotIn('| Example 0 |', summary)
-                self.assertIn('SOURCE_RUNS.json', summary)
+                self.assertIn('runtime.yaml', summary)
 
 
 if __name__ == '__main__':

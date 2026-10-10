@@ -34,14 +34,8 @@ def save_torch(path,data):
 def save_csv(path,frame):
     path=Path(path);temp=path.with_suffix('.csv.tmp');frame.to_csv(temp,index=False);temp.replace(path)
 def original_config(task,cfg):
-    if task in FULL_CONFIGS:
-        data=yaml.safe_load((HERE/'configs'/(FULL_CONFIGS[task]+'_full.yaml')).read_text())
-        data=json.loads(json.dumps(data).replace('{artifact_root}',str(cfg['artifact_root'])))
-        return data
-    return yaml.safe_load((Path(cfg['history_root'])/'inputs'/task/'train_config.yaml').read_text())
-def concept_dir(task,cfg):
-    root=cfg['concept_root'] if task in FULL_CONFIGS else cfg['history_concept_root']
-    return Path(root)/task/'labels'
+    data=yaml.safe_load((HERE/'configs'/(FULL_CONFIGS[task]+'_full.yaml')).read_text())
+    return json.loads(json.dumps(data).replace('{artifact_root}',str(cfg['artifact_root'])))
 
 def backbone_dir(task,cfg):
     """Read frozen multimodal outputs from this run or an explicitly reused run."""

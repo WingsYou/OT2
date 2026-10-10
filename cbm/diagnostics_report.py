@@ -20,7 +20,6 @@ def number(x): return 'NA' if pd.isna(x) else f'{x:.4g}'
 
 def make_diagnostics_report(cfg):
     root = Path(cfg['output_root']); out = root/'tables/concept_diagnostics'
-    auroc_mode = cfg.get('concept_ranking') == 'auroc_mean_plus_2sd'
     out.mkdir(parents=True,exist_ok=True)
     tasks = [t for t in cfg['tasks'] if (root/t/'concept_diagnostics/DONE.json').exists()
              and read_json(root/t/'concept_diagnostics/DONE.json').get('version')==VERSION]
@@ -46,7 +45,7 @@ def make_diagnostics_report(cfg):
         for key, values in auroc_selection(group.auroc_gain, evaluable).items():
             if key not in r: r[key] = False if key == 'auroc_selected' else np.nan
             r.loc[idx, key] = values
-    rank_column = 'auroc_rank_within_split' if auroc_mode else 'brier_rank_within_split'
+    rank_column = 'auroc_rank_within_split'
     frames['restoration'] = r.sort_values(['task','split','source','population',rank_column,'concept_id'],na_position='last')
     for split in ('val','test'):
         q,p,c,s = [frames[name].query('split == @split') for name in ('quality','performance','comparisons','restoration')]
@@ -105,46 +104,39 @@ def make_diagnostics_report(cfg):
                   'Brier gain = baseline Brier − supplemented Brier; AUROC/F1/BA gain = supplemented − baseline. '
                   'Positive values are improvements. Test rankings are exploratory, and their intervals do not account '
                   'for selecting the largest test effects.', '']
-        if auroc_mode:
-            lines += [f'Tables report single Concept IDs with {split} ΔAUROC > μ + 2σ, ranked directly on {split}. '
-                      'μ and σ are computed separately for each task and intervention source across all evaluated individual IDs; '
-                      'σ is the population standard deviation (ddof=0). Predicted restoration includes constant IDs with zero gain. '
-                      'Measured supplementation requires usable measured targets. Joint/all-ID restoration does not enter the distribution. '
-                      'This is a descriptive outlier rule, not a significance test. No fixed top-10 padding or extra positivity filter is applied; '
-                      'a selected negative gain is still a deterioration. Test candidates are not selected using validation ranks. '
-                      'The CSV retains every ID with its AUROC rank, selection flag, μ, σ and cutoff; unevaluable IDs appear last. '
-                      'AUROC has paired bootstrap intervals without permutation p/q values.', '']
-            selection_rows = []
-            for (task,source), group in s[s.population=='all_participants'].groupby(['task','source'],sort=False):
-                first = group.iloc[0]
-                selection_rows.append([TASK_LABELS[task],source,int(first.auroc_selection_n),
-                                       number(first.auroc_selection_mean),number(first.auroc_selection_std),
-                                       number(first.auroc_selection_cutoff),int(group.auroc_selected.sum())])
-            lines += [md(['Task','Intervention source','Evaluated IDs','Mean ΔAUROC (μ)','SD (σ)','μ + 2σ','Selected IDs'],selection_rows)]
-        else:
-            lines += ['Brier ordering is an exploratory probability analysis, not proof of improved classification accuracy. '
-                      f'Tables show {split} Brier rank ≤10 (including ties at the boundary), ranked directly on {split}. '
-                      'Test candidates are not selected using validation ranks. A top-ranked effect may be zero or negative. '
-                      'The CSV contains every ID, sorted by within-split Brier rank within each task, source and population; '
-                      'unevaluable IDs have no rank and appear last.', '']
+        lines += [f'Tables report single Concept IDs with {split} ΔAUROC > μ + 2σ, ranked directly on {split}. '
+                  'μ and σ are computed separately for each task and intervention source across all evaluated individual IDs; '
+                  'σ is the population standard deviation (ddof=0). Predicted restoration includes constant IDs with zero gain. '
+                  'Measured supplementation requires usable measured targets. Joint/all-ID restoration does not enter the distribution. '
+                  'This is a descriptive outlier rule, not a significance test. No fixed top-10 padding or extra positivity filter is applied; '
+                  'a selected negative gain is still a deterioration. Test candidates are not selected using validation ranks. '
+                  'The CSV retains every ID with its AUROC rank, selection flag, μ, σ and cutoff; unevaluable IDs appear last. '
+                  'AUROC has paired bootstrap intervals without permutation p/q values.', '']
+        selection_rows = []
+        for (task,source), group in s[s.population=='all_participants'].groupby(['task','source'],sort=False):
+            first = group.iloc[0]
+            selection_rows.append([TASK_LABELS[task],source,int(first.auroc_selection_n),
+                                   number(first.auroc_selection_mean),number(first.auroc_selection_std),
+                                   number(first.auroc_selection_cutoff),int(group.auroc_selected.sum())])
+        lines += [md(['Task','Intervention source','Evaluated IDs','Mean ΔAUROC (μ)','SD (σ)','μ + 2σ','Selected IDs'],selection_rows)]
         for source,title in [('full_input_prediction','Full-input predicted concept restoration'),('measured','Measured concept supplementation')]:
             lines += [f'### {title} — all participants', '']
             for task in tasks:
-                selected = s.auroc_selected if auroc_mode else s.brier_rank_within_split<=10
+                selected = s.auroc_selected
                 z=s[(s.task==task)&(s.source==source)&(s.population=='all_participants')&selected]
                 if source=='measured':z=z[z.n_eligible>0]
                 z=z.sort_values([rank_column,'concept_id'])
                 lines += [f'#### {TASK_LABELS[task]}', '']
                 if z.empty:
-                    lines += [f'No single Concept ID exceeded the {split} μ + 2σ cutoff.' if auroc_mode else f'No evaluable {split}-ranked candidates.', ''];continue
-                lines += [md([split.title()+(' AUROC rank' if auroc_mode else ' Brier rank'),'Concept ID','Concept','Source fields','Eligible N / total',
+                    lines += [f'No single Concept ID exceeded the {split} μ + 2σ cutoff.', ''];continue
+                lines += [md([split.title()+' AUROC rank','Concept ID','Concept','Source fields','Eligible N / total',
                               'ΔAUROC [95% CI]','ΔBrier [95% CI]','Brier q','ΔF1 [95% CI]','ΔBA [95% CI]','Corrected / newly wrong'],
                     [[int(getattr(x,rank_column)),x.concept_id,x.concept_name,x.source_fields,f'{x.n_eligible}/{x.n_total}',
                       ci(x._asdict(),'auroc_gain',True),ci(x._asdict(),'brier_gain',True),number(x.brier_q_value),ci(x._asdict(),'f1_gain',True),
                       ci(x._asdict(),'ba_gain',True),f'{int(x.corrected)}/{int(x.newly_wrong)}'] for x in z.itertuples()])]
                 if source=='measured':
                     obs=s[(s.task==task)&(s.source==source)&(s.population=='observed_participants')&s.concept_id.isin(z.concept_id)].sort_values([rank_column,'concept_id'])
-                    lines += [f'The same candidates, evaluated only among participants with usable measured labels, sorted by their {split} '+('AUROC' if auroc_mode else 'Brier')+' gain in that subset:', '',
+                    lines += [f'The same candidates, evaluated only among participants with usable measured labels, sorted by their {split} '+'AUROC'+' gain in that subset:', '',
                               md(['Concept ID','Observed N','Positive / negative','ΔAUROC [95% CI]','ΔBrier [95% CI]','ΔF1 [95% CI]','ΔBA [95% CI]'],
                                  [[x.concept_id,x.n,f'{x.positive}/{x.negative}',ci(x._asdict(),'auroc_gain',True),ci(x._asdict(),'brier_gain',True),
                                    ci(x._asdict(),'f1_gain',True),ci(x._asdict(),'ba_gain',True)] for x in obs.itertuples()])]

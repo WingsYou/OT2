@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -16,6 +17,8 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 PREP = HERE / 'data_preprocessing_cluster'
+# Historical preprocessing namespaces are intermediate files, not study endpoints.
+PREPROCESSING_TASKS = ('moca_binary', 'cvd_broad_binary', 'cvd_strict_binary')
 CURRENT_TASKS = ('moca_binary', 'cardiovascular_conditions_binary',
                  'major_cardiovascular_events_binary', 'osteoporosis_history_binary',
                  'kidney_history_binary', 'lung_history_binary')
@@ -50,8 +53,66 @@ def load_config(path):
     return cfg
 
 
+def command(script, *args):
+    return [sys.executable, '-u', str(PREP / script), *map(str, args)]
+
+
+def raw_commands(cfg):
+    """Use the supplied Cluster preprocessing definitions and train-only scalers."""
+    root = Path(cfg['prepared_root']); people = cfg['participants']
+    dataset = cfg['dataset_root']; clinical = cfg['clinical_dir']; n = cfg['workers']
+    m = {k: v or '<SET_' + k + '_MANIFEST>' for k, v in cfg['manifests'].items()}
+    yield command('build_downstream_labels.py', '--participants', people,
+                  '--clinical_dir', clinical, '--out_dir', root/'labels')
+    yield command('build_retinal_asset_index_v2.py', '--participants', people,
+                  *[x for k in ('retinal_photography','retinal_oct','retinal_octa','retinal_flio')
+                    for x in ('--'+k, m[k])], '--out_dir', root/'retinal_index')
+    yield command('preprocess_retinal_assets_v2.py', '--asset-index', root/'retinal_index/retinal_asset_index.csv',
+                  '--dataset-root', dataset, '--out-dir', root/'retinal', '--num-workers', n)
+    yield command('build_retinal_model_view_sidecars_v2.py', '--retinal-index', root/'retinal/retinal_preprocessed_index.csv',
+                  '--out-dir', root/'retinal_model_views', '--num-workers', n,
+                  '--max-photography-assets', 6, '--max-oct-assets', 2, '--max-octa-assets', 16, '--max-flio-assets', 4)
+    yield command('build_ecg_waveform_features_v2.py', '--manifest', m['cardiac_ecg'],
+                  '--dataset-root', dataset, '--out-dir', root/'ecg', '--num-workers', n)
+    yield command('build_environment_5min_sequences.py', '--participants', people,
+                  '--manifest', m['environment'], '--dataset_root', dataset,
+                  '--out_dir', root/'environment_v4', '--num_workers', n)
+    yield command('build_wearable_5min_sequences.py', '--participants', people,
+                  '--glucose_manifest', m['wearable_blood_glucose'], '--activity_manifest', m['wearable_activity_monitor'],
+                  '--dataset_root', dataset, '--out_dir', root/'wearable_v5', '--num_workers', n)
+    for task in PREPROCESSING_TASKS:
+        folder = root/'clinical'/task
+        wide = folder/f'clinical_features_{task}_wide.csv'; schema = folder/f'clinical_schema_{task}.json'
+        yield command('build_clinical_tabular_features_v2.py', '--participants', people,
+                      '--clinical_dir', clinical, '--task', task, '--out_dir', folder,
+                      '--include_condition', '--include_procedure')
+        yield command('fit_train_scalers_v2.py', '--participants', people,
+                      '--clinical-wide', wide, '--clinical-schema', schema,
+                      '--ecg-numeric-wide', root/'ecg/ecg_numeric_features_wide.csv',
+                      '--ecg-channel-stats', root/'ecg/ecg_channel_stats.csv', '--ecg-schema', root/'ecg/ecg_schema.json',
+                      '--environment-index', root/'environment_v4/environment_5min_index.csv',
+                      '--environment-artifact-dir', root/'environment_v4', '--environment-schema', root/'environment_v4/environment_5min_schema.json',
+                      '--wearable-index', root/'wearable_v5/wearable_5min_index.csv',
+                      '--wearable-artifact-dir', root/'wearable_v5', '--wearable-schema', root/'wearable_v5/wearable_5min_schema.json',
+                      '--output', root/f'scalers/train_scalers_{task}.json')
+        yield command('build_multimodal_index_v2.py', '--participants', people,
+                      '--labels', root/f'labels/labels_{task}.csv', '--clinical_features', wide, '--clinical_schema', schema,
+                      '--retinal_index', root/'retinal_model_views/retinal_model_view_index.csv',
+                      '--ecg_index', root/'ecg/ecg_index.csv', '--environment_index', root/'environment_v4/environment_5min_index.csv',
+                      '--wearable_index', root/'wearable_v5/wearable_5min_index.csv', '--artifact_root', root,
+                      '--out_csv', root/f'model_full_assets_v1/inputs/master_{task}.csv',
+                      '--metadata_json', root/f'model_full_assets_v1/inputs/master_{task}.metadata.json')
+
+
+def execute(cmd, dry=False):
+    print(shlex.join(list(map(str, cmd))), flush=True)
+    if not dry:
+        env = os.environ.copy()
+        env['PYTHONPATH'] = str(PREP)
+        subprocess.run(cmd, check=True, cwd=PREP, env=env)
+
+
 def run_raw(cfg, dry_run=False):
-    from pipeline import raw_commands, execute
     root = Path(cfg['prepared_root'])
     marker = root / 'completed_commands.json'
     done = json.loads(marker.read_text()) if marker.exists() else []
@@ -242,7 +303,7 @@ def main():
     if args.stage in ('all', 'cache'):
         if args.dry_run:
             print('Build label-free cache for all participants -> ' + cfg['source_root'])
-            print('Prepare current six task labels and clinical input registry; no original12 concepts')
+            print('Prepare current six task labels and clinical input registry')
         else:
             run_cache(cfg, args.config.resolve(), list(map(str, args.devices or cfg.get('devices', [0, 1, 2, 3]))))
 

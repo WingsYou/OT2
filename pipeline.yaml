@@ -14,7 +14,6 @@ manifests:
   wearable_blood_glucose: "{dataset_root}/wearable_blood_glucose/manifest.tsv"
 prepared_root: outputs/preprocessed
 source_root: outputs/prepared
-new_output_root: outputs/study_without_observation
 workers: 8
 devices: [0, 1, 2, 3]
 num_workers: 2

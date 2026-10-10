@@ -163,6 +163,6 @@ def make_recovery_report(cfg):
                   f'- Full diagnostics, including concept prediction quality and input-removal comparisons: '
                   f'[SUMMARY_CONCEPT_DIAGNOSTICS_{split}.md]'
                   f'(concept_diagnostics/SUMMARY_CONCEPT_DIAGNOSTICS_{split}.md).',
-                  '- Source checkpoints and reused runs: [SOURCE_RUNS.json](../SOURCE_RUNS.json).', '']
+                  '- Run settings: [runtime.yaml](../runtime.yaml).', '']
         (out/f'SUMMARY_CONCEPT_RECOVERY_{split}.md').write_text('\n'.join(lines))
     print(f'[recovery tables] {out}', flush=True)

@@ -6,11 +6,11 @@ from common import TASK_LABELS, INPUT_LABELS, read_json
 from stats import bh_adjust, auroc_selection
 
 MODEL_NAMES = {'full':'Full Clinical model', 'full_basic_inference':'Full model: Basic Clinical at inference',
-               'basic':'Basic Clinical model', 'basic_cbm':'Basic Clinical + CBM',
+               'basic':'Basic Clinical model',
                'mixed_full':'Mixed CBM: full clinical inputs', 'mixed_basic':'Mixed CBM: basic clinical inputs'}
 COMPARISON_NAMES = {'full_input_loss':'Full model: loss after removing nonbasic clinical inputs',
     'basic_vs_full':'Basic minus Full model', 'retraining_gain':'Basic retraining gain over Full model with basic-only clinical inputs',
-    'basic_cbm_gain':'Basic CBM minus Basic model', 'mixed_cbm_gain':'Mixed CBM (basic inputs) minus Full model (basic inputs)',
+    'mixed_cbm_gain':'Mixed CBM (basic inputs) minus Full model (basic inputs)',
     'mixed_input_loss':'Mixed CBM: loss after removing nonbasic clinical inputs'}
 
 
@@ -60,12 +60,9 @@ def auroc_concept_table(rows, task, split):
 def make_report(cfg):
     from analysis import ANALYSIS_VERSION
     root = Path(cfg['output_root']); out = root/'tables'; out.mkdir(exist_ok=True)
-    modes = cfg.get('cbm_modes', ['basic','mixed'])
     completed = [t for t in cfg['tasks'] if (root/t/'analysis/DONE.json').exists()
-                 and read_json(root/t/'analysis/DONE.json').get('analysis_version')==ANALYSIS_VERSION
-                 and read_json(root/t/'analysis/DONE.json').get('cbm_modes', ['basic','mixed'])==modes]
+                 and read_json(root/t/'analysis/DONE.json').get('analysis_version')==ANALYSIS_VERSION]
     if not completed: return
-    auroc_top = cfg.get('concept_ranking')=='auroc_mean_plus_2sd'
     frames = {}
     for name in ('classification','comparisons','ablation','restoration','cohorts'):
         df = pd.concat([pd.read_csv(root/t/'analysis'/(name+'.csv'), dtype={'concept_id':str}) for t in completed], ignore_index=True)
@@ -74,7 +71,7 @@ def make_report(cfg):
                 df[prefix+'q_value'] = np.nan
                 for _, idx in df.groupby(['split','family']).groups.items():
                     df.loc[idx,prefix+'q_value'] = bh_adjust(df.loc[idx,prefix+'p_value'])
-        if name=='restoration' and auroc_top:
+        if name=='restoration':
             single = df.intervention=='individual'
             df['auroc_selected'] = False
             for _, idx in df[single].groupby(['task','split','mode','removed_input']).groups.items():
@@ -102,12 +99,9 @@ def make_report(cfg):
             f'Completed tasks: {len(completed)}/{len(cfg["tasks"])}. Seed {cfg["seed"]}. '
             f'{cfg["bootstrap_samples"]:,} participant bootstrap resamples. AUROC, positive-class F1 and balanced accuracy (BA).', '',
             'Full and Basic model modality ablations are separate from the CBM experiment. '
-            'Every task uses the same Mixed-CBM removal: nonbasic clinical inputs are withheld, while Basic Clinical and the other eight modalities remain available.'+
-            (' Basic CBM classification is retained as an additional result; its task-specific top-three restoration analysis is no longer run.'
-             if 'basic' in modes else ''), '',
-            'Checkpoint selection and F1 thresholds use validation only. Modality top-three markers are validation-selected descriptive summaries; they do not select CBM removal conditions. '+
-            ('Individual Concept IDs are ranked by ΔAUROC within each task/split; displayed IDs exceed the mean + 2 population SD of all finite evaluated individual-ID gains. '
-             if auroc_top else 'Concept IDs are ranked within each split by F1 recovery, with tied effects sharing a rank. ')+
+            'Every task uses the same Mixed-CBM removal: nonbasic clinical inputs are withheld, while Basic Clinical and the other eight modalities remain available.', '',
+            'Checkpoint selection and F1 thresholds use validation only. Modality top-three markers are validation-selected descriptive summaries; they do not select CBM removal conditions. '
+            'Individual Concept IDs are ranked by ΔAUROC within each task/split; displayed IDs exceed the mean + 2 population SD of all finite evaluated individual-ID gains. '
             'Test concept ranks are exploratory. '
             'BA uses the same frozen threshold. Validation and test retain their natural class proportions; only training uses balanced oversampling.', '']
         if cfg.get('exclude_observation'):
@@ -161,42 +155,17 @@ def make_report(cfg):
                  interval(x._asdict(),True,'ba_'),prob(x.ba_p_value),prob(x.ba_q_value)] for x in all_rows.itertuples()]),
             '### Individual Concept-ID restoration', '',
             '**Recovery = restored − masked performance.** Each ID is restored separately from the same masked baseline; '
-            'all source fields sharing an ID move together. Concepts are not restored cumulatively. '+
-            ('All IDs with ΔAUROC > μ + 2σ are displayed, with σ calculated using ddof=0 across all finite evaluated single-ID gains in this task/split. '
-             'The all-concepts-restored endpoint is excluded from that distribution. This describes unusually large effects within this bank; '
-             'it is not a significance test or a two-standard-error interval. Selection uses unrounded values. No minimum count or Top10 padding is imposed. '
-             if auroc_top else 'Up to ten learnable IDs are displayed per task; all individual results are exported. Ties are shown explicitly; ')+
-            ('' if auroc_top else
-            'Concept ID only breaks display-order ties, including at the ten-row boundary. A top-ranked effect may be zero or negative. '
-            )+
+            'all source fields sharing an ID move together. Concepts are not restored cumulatively. '
+            'All IDs with ΔAUROC > μ + 2σ are displayed, with σ calculated using ddof=0 across all finite evaluated single-ID gains in this task/split. '
+            'The all-concepts-restored endpoint is excluded from that distribution. This describes unusually large effects within this bank; '
+            'it is not a significance test or a two-standard-error interval. Selection uses unrounded values. No minimum count or Top10 padding is imposed. '
             'Equal F1/BA need not imply equal probabilities. The CSV includes probability changes, classification-change counts, '
             'confusion counts and exact probability/decision equivalence groups within each task/split/removal.', '']
         for t in completed:
-            if auroc_top:
-                lines += auroc_concept_table(r,t,split)
-                continue
-            z = r[(r.task==t)&(r.intervention=='individual')&r['rank'].notna()].sort_values(['rank','concept_id']).head(10)
-            lines += [f'#### {TASK_LABELS[t]} — nonbasic clinical inputs removed', '']
-            if z.empty:
-                lines += ['No learnable Concept IDs in this fitted bank.', '']; continue
-            first = z.iloc[0]
-            lines += [f'Masked CBM: F1 {first.masked_f1:.4f}, BA {first.masked_ba:.4f}.', '',
-                md([split.title()+' F1 rank','Concept ID','Concept (recorded terminology)','Source fields restored together',
-                    'Restored F1 / BA','F1 recovery [95% CI]','F1 p','F1 q','BA recovery [95% CI]','BA p','BA q',
-                    'Changed classifications (N)','Mean absolute probability change'],
-                   [[str(int(x.rank))+(' (tie)' if x.tied_concepts>1 else ''),x.concept_id,x.concept_name,x.source_fields,
-                     f'{x.restored_f1:.4f} / {x.restored_ba:.4f}',interval(x._asdict(),True),prob(x.p_value),prob(x.q_value),
-                     interval(x._asdict(),True,'ba_'),prob(x.ba_p_value),prob(x.ba_q_value),
-                     int(x.n_prediction_changes),f'{x.mean_abs_probability_change:.6g}'] for x in z.itertuples()])]
-        if 'basic' in modes:
-            lines += ['## Additional results: Basic CBM classification and selected fits', '',
-                md(['Task','Basic Clinical model','Basic Clinical + CBM','Basic CBM selected fit','Mixed CBM selected fit'],
-                   [[TASK_LABELS[t],cell(t,'basic'),cell(t,'basic_cbm'),
-                     *[read_json(root/t/(m+'_cbm')/'DONE.json')['selection']['joint']['status'] for m in ('basic','mixed')]] for t in completed])]
-        else:
-            lines += ['## CBM selected fits', '',
-                md(['Task','Mixed CBM selected fit'],
-                   [[TASK_LABELS[t],read_json(root/t/'mixed_cbm/DONE.json')['selection']['joint']['status']] for t in completed])]
+            lines += auroc_concept_table(r,t,split)
+        lines += ['## CBM selected fits', '',
+            md(['Task','Mixed CBM selected fit'],
+               [[TASK_LABELS[t],read_json(root/t/'mixed_cbm/DONE.json')['selection']['joint']['status']] for t in completed])]
         lines += [
             '`fitted` denotes a selected joint-tuning epoch; `sequential_fallback` retains the concept-then-head model. '
             'Joint tuning is selected only when validation F1/BCE improves while satisfying the concept-loss tolerance.', '',
@@ -226,11 +195,9 @@ def make_report(cfg):
             'they are diagnostic labels, not concept clusters. Source definitions and supervision remain in the task/CBM directories. '
             'Task outcome exclusions and the four previously excluded administrative IDs remain in effect. '
             'Participant-level predictions remain in the local result directory.', '']
-        rank_column = 'auroc_rank_within_split' if auroc_top else 'rank'
-        individual = r[r.intervention=='individual'].sort_values(['task',rank_column,'concept_id'],na_position='last')
+        individual = r[r.intervention=='individual'].sort_values(['task','auroc_rank_within_split','concept_id'],na_position='last')
         individual.to_csv(out/f'CONCEPT_RESTORATION_ALL_{split}.csv',index=False)
-        if auroc_top:
-            individual[individual.auroc_selected].to_csv(out/f'CONCEPT_RESTORATION_SELECTED_AUROC_{split}.csv',index=False)
+        individual[individual.auroc_selected].to_csv(out/f'CONCEPT_RESTORATION_SELECTED_AUROC_{split}.csv',index=False)
         all_rows.to_csv(out/f'ALL_CONCEPTS_RESTORED_{split}.csv',index=False)
         mixed = c[c.model.isin(['mixed_full','mixed_basic'])].copy()
         additional = [dict(task=x.task,split=split,model='mixed_all_restored',threshold=x.threshold,n=x.n,

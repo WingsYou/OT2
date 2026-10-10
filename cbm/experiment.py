@@ -1,4 +1,4 @@
-"""Fit Basic or Mixed CBM on the corresponding freshly trained backbone."""
+"""Fit the shared Mixed CBM on a frozen Full Clinical backbone."""
 from pathlib import Path
 import pandas as pd
 import torch
@@ -7,25 +7,25 @@ from train import load
 from cbm.model import fit
 
 
-def run_cbm(task, mode, cfg, device):
+def run_cbm(task, cfg, device):
     task_root = Path(cfg['output_root'])/task
-    root = task_root/(mode+'_cbm'); root.mkdir(parents=True, exist_ok=True)
-    if (root/'DONE.json').exists(): print(f'[reuse] {task}/{mode}_cbm', flush=True); return
-    source = backbone_dir(task,cfg)/('basic' if mode=='basic' else 'full')
+    root = task_root/'mixed_cbm'; root.mkdir(parents=True, exist_ok=True)
+    if (root/'DONE.json').exists(): print(f'[reuse] {task}/mixed_cbm', flush=True); return
+    source = backbone_dir(task,cfg)/'full'
     train = load(source/'features_train.pt'); val = load(source/'features_val.pt')
     labels = pd.read_csv(Path(cfg['output_root'])/'labels'/task/'labels.csv', dtype=str, keep_default_na=False)
     schema = read_json(Path(cfg['output_root'])/'labels'/task/'schema.json')
-    validation = {**val, 'embedding':val['masked_embedding']} if mode=='mixed' else val
+    validation = {**val, 'embedding':val['masked_embedding']}
     torch.set_float32_matmul_precision('highest')
     artifact, history = fit(train, validation, labels, schema, cfg, device,
-                            masked_train=train['masked_embedding'] if mode=='mixed' else None)
+                            masked_train=train['masked_embedding'])
     save_torch(root/'model.pt', artifact)
     pd.DataFrame(history).to_csv(root/'training.csv', index=False)
     write_json(root/'concept_definitions.json', artifact['spec']['items'])
-    write_json(root/'DONE.json', dict(task=task, mode=mode, threshold=artifact['threshold'],
+    write_json(root/'DONE.json', dict(task=task, mode='mixed', threshold=artifact['threshold'],
         selection=artifact['selection'], inventory_ids=schema['inventory_ids'],
         learned_items=sum(c['learnable'] for c in artifact['spec']['items']),
-        input_backbone='basic' if mode=='basic' else 'full', backbone_frozen=True))
+        input_backbone='full', backbone_frozen=True))
 
 
 def concept_id_groups(items):

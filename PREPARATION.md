@@ -53,7 +53,7 @@ These files are in `data_preprocessing_cluster/` unless their path is shown othe
 
 History tasks retain the study's MoCA-derived clinical feature view, with their own target fields excluded before model input. Replacement cardiovascular tasks have their own clinical views. The common native cache includes every row in `participants.tsv` and contains no task outcome labels. Task-specific eligibility is applied when training, so participants without valid labels for one task are not lost from another task's input cache.
 
-Concept supervision is extracted later by `cbm/labels.py` from the local clinical CSVs and `configs/task_specific_concepts.json`. The historical 12-concept builder is retained for reference but is not executed by the public workflow.
+Concept supervision is extracted later by `cbm/labels.py` from the local clinical CSVs and `configs/task_specific_concepts.json`. The study uses task-specific Concept IDs from Measurement, Condition, Device, and Procedure; Observation-domain targets are excluded.
 
 ## Outputs and resuming
 
@@ -96,4 +96,4 @@ Readers reconstruct the study inputs using their own dataset copy and environmen
 
 You do not need to repeat preprocessing for an existing prepared study. Run its saved `runtime.yaml`, or create an ignored `study.local.yaml` pointing to the existing `source_root` and `clinical_dir` and a separate `output_root`. Keep saved experiment settings when resuming.
 
-`pipeline.py` and `prepare_study_inputs.py` preserve earlier helper functions used by the original study. Their historical `labels` command includes the retired original12 bank and is not part of the public six-task workflow.
+`prepare_public_inputs.py` is the only preparation entry point. Training and all paper analyses then run through `run.py`; they do not rerun preprocessing.

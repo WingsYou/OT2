@@ -12,7 +12,7 @@ from common import read_json, save_torch, write_json
 from cbm.model import IndividualCBM, state
 from cbm.experiment import concept_id_groups, restoration_batch
 from cbm.diagnostics import (DIAGNOSTIC_FILES, measured_targets, concept_quality, run_diagnostics,
-                             resolve_diagnostic_config, supplementation_statistics)
+                             supplementation_statistics, VERSION)
 from cbm.diagnostics_report import make_diagnostics_report
 
 
@@ -33,51 +33,29 @@ def specification():
 
 
 class ConceptDiagnosticsTests(unittest.TestCase):
-    def test_source_routing_reuses_matching_diagnostics_without_model_loading(self):
+    def test_completed_diagnostics_reuses_same_output_without_model_loading(self):
         task='moca_binary'
         with tempfile.TemporaryDirectory() as tmp:
-            top=Path(tmp);source=top/'source';out=top/'report'
-            source.mkdir()
-            saved=dict(tasks=[task],output_root=str(source),seed=7,bootstrap_samples=10000,
-                       cpu_threads=8,exclude_observation=True)
-            write_json(source/'runtime.yaml',saved)  # JSON is valid YAML.
-            cfg=dict(tasks=[task],output_root=str(out),diagnostic_sources={task:str(source)},
-                     exclude_observation=True,seed=42,bootstrap_samples=10000,cpu_threads=2)
-            resolved=resolve_diagnostic_config(task,cfg)
-            self.assertEqual(resolved['cbm_source_root'],str(source.resolve()))
-            self.assertEqual(resolved['backbone_root'],str(source.resolve()))
-            self.assertEqual(resolved['cpu_threads'],2)
-            self.assertEqual(resolved['seed'],42)
-            folder=source/task/'concept_diagnostics';folder.mkdir(parents=True)
+            root=Path(tmp)
+            cfg=dict(tasks=[task],output_root=str(root),exclude_observation=True,
+                     seed=42,bootstrap_samples=10000,cpu_threads=2)
+            folder=root/task/'concept_diagnostics';folder.mkdir(parents=True)
             for name in DIAGNOSTIC_FILES:
                 (folder/name).write_text(name+'\n')
-            done=dict(version=2,task=task,seed=42,bootstrap_samples=10000,threshold=.61,training=False)
+            done=dict(version=VERSION,task=task,seed=42,bootstrap_samples=10000,threshold=.61,training=False)
             write_json(folder/'DONE.json',done)
             before=(folder/'DONE.json').read_bytes()
             with patch('cbm.model.fit',side_effect=AssertionError('must not train')), \
                  patch('cbm.diagnostics.load',side_effect=AssertionError('must not load checkpoint')):
-                run_diagnostics(task,resolved,torch.device('cpu'))
-                run_diagnostics(task,resolved,torch.device('cpu'))
-            destination=out/task/'concept_diagnostics'
+                run_diagnostics(task,cfg,torch.device('cpu'))
+                run_diagnostics(task,cfg,torch.device('cpu'))
             self.assertEqual((folder/'DONE.json').read_bytes(),before)
-            self.assertEqual(read_json(destination/'DONE.json')['threshold'],.61)
-            for name in DIAGNOSTIC_FILES:
-                self.assertEqual((destination/name).read_bytes(),(folder/name).read_bytes())
-                self.assertNotEqual((destination/name).stat().st_ino,(folder/name).stat().st_ino)
-            # Changed bootstrap settings cannot reuse either source or destination results.
-            changed={**resolved,'bootstrap_samples':100}
+            self.assertEqual(read_json(folder/'DONE.json')['threshold'],.61)
+            changed={**cfg,'bootstrap_samples':100}
             with patch('cbm.diagnostics.load',side_effect=AssertionError('requires inference')):
                 with self.assertRaisesRegex(AssertionError,'requires inference'):
                     run_diagnostics(task,changed,torch.device('cpu'))
-            self.assertFalse((destination/'DONE.json').exists())
-            self.assertEqual((folder/'DONE.json').read_bytes(),before)
-            with self.assertRaisesRegex(ValueError,'Observation bank differs'):
-                resolve_diagnostic_config(task,{**cfg,'exclude_observation':False})
-            with self.assertRaisesRegex(ValueError,'not in the saved source run'):
-                resolve_diagnostic_config('lung_history_binary',{
-                    **cfg,'diagnostic_sources':{'lung_history_binary':str(source)}})
-            with self.assertRaisesRegex(ValueError,'separate output_root'):
-                resolve_diagnostic_config(task,{**cfg,'output_root':str(source)})
+            self.assertFalse((folder/'DONE.json').exists())
 
     def test_auroc_paired_bootstrap_and_selection(self):
         y=np.array([0,0,0,1,1,1]);a=np.array([.1,.5,.7,.5,.7,.9]);b=np.array([.8,.5,.7,.5,.7,.2])
@@ -205,15 +183,7 @@ class ConceptDiagnosticsTests(unittest.TestCase):
                     self.assertEqual(q[q.concept_id=='102'].iloc[0].n_unseen_category,1)
                 text=(table/'SUMMARY_CONCEPT_DIAGNOSTICS_test.md').read_text()
                 self.assertIn('without Observation' if excluded else 'with the four approved Observation surveys',text)
-                self.assertIn('Test Brier rank',text)
-                self.assertIn('ranked directly on test',text)
                 self.assertNotIn('validation_brier_rank',frame.columns)
-                for _, group in frame.groupby('population'):
-                    ranks=group.brier_rank_within_split.dropna()
-                    self.assertTrue(ranks.is_monotonic_increasing)
-                cfg['concept_ranking']='auroc_mean_plus_2sd'
-                make_diagnostics_report(cfg)
-                text=(table/'SUMMARY_CONCEPT_DIAGNOSTICS_test.md').read_text()
                 self.assertIn('test ΔAUROC > μ + 2σ',text)
                 self.assertIn('not a significance test',text)
                 ranked=pd.read_csv(table/'PREDICTED_RESTORATION_BRIER_test.csv')
@@ -222,18 +192,7 @@ class ConceptDiagnosticsTests(unittest.TestCase):
                 np.testing.assert_array_equal(ranked.auroc_selected,ranked.auroc_gain>ranked.auroc_selection_cutoff)
                 with patch('cbm.diagnostics.load',side_effect=AssertionError('must reuse')):
                     run_diagnostics(task,cfg,torch.device('cpu'))
-                # Routed inference reads all frozen models/labels/features from their source,
-                # including a backbone in a different run, and writes only new diagnostics.
-                routed={**cfg,'output_root':str(root/'new_report'),'cbm_source_root':str(root)}
-                with patch('cbm.model.fit',side_effect=AssertionError('must not train')), \
-                     patch('cbm.diagnostics.completed_diagnostics',return_value=None):
-                    run_diagnostics(task,routed,torch.device('cpu'))
-                new_root=Path(routed['output_root'])
-                self.assertFalse((new_root/'labels').exists())
-                self.assertFalse((new_root/task/'mixed_cbm').exists())
-                for name in DIAGNOSTIC_FILES:
-                    self.assertEqual((new_root/task/'concept_diagnostics'/name).read_bytes(),
-                                     (root/task/'concept_diagnostics'/name).read_bytes())
+
 
 
 if __name__=='__main__':unittest.main()

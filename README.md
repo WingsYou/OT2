@@ -90,13 +90,20 @@ For one GPU, use `--devices 0`. Device numbers refer to GPUs visible to the job;
 | `kidney_history_binary` | Kidney-problem history |
 | `lung_history_binary` | Lung-problem history |
 
-The experiment includes:
+The workflow runs exactly three experiment groups:
 
-1. **Downstream prediction:** Full Clinical; the same Full model with nonbasic clinical inputs withheld at inference; and a separately trained Basic Clinical model. Basic retains 23 encoded basic patient features and all eight nonclinical modalities.
-2. **Modality importance:** single-modality and retinal/wearable family ablations in Full and Basic models. All 11 removals are reported.
-3. **Mixed CBM:** one shared concept predictor/classifier trained on full and masked representations from the frozen Full model; evaluated with full and basic-only clinical inputs.
-4. **Predicted-concept restoration:** replace one ID's masked-input predictions with the participant's full-input concept predictions. Also restore all IDs simultaneously.
-5. **Measured-concept supplementation:** supply available, encodable recorded values at the bottleneck. Report concept prediction quality and both all-participant and observed-label-subset effects.
+| Paper experiment | Training and evaluation | Outputs |
+|---|---|---|
+| **Full Clinical model** | Train using all eligible clinical features plus the other eight modalities. Evaluate full inputs, basic-only clinical inputs at inference, and all 11 modality removals. | Downstream classification and Full-model ablations |
+| **Basic Clinical model** | Train a separate model using the 23 encoded basic patient features plus the other eight modalities. Evaluate its baseline and the same 11 modality removals. | Downstream classification and Basic-model ablations |
+| **Mixed CBM** | Freeze the Full model. Train one shared concept predictor/classifier on paired full and masked representations. Evaluate both input conditions and the two interventions below. | CBM classification and concept recovery |
+
+The **11 modality removals** are clinical information, ECG, environment, FLIO, OCT, OCTA, retinal photography, wearable activity, CGM, all four retinal modalities together, and both wearable modalities together. Removing clinical information means the entire clinical branch of the model being evaluated.
+
+For the **Mixed CBM**, masking removes only **nonbasic clinical features** and their availability indicators; basic patient information and the other eight modalities remain. Each intervention starts from this same masked-input baseline:
+
+- **Predicted-concept restoration:** replace one ID's concept channels with the same participant's full-input concept predictions. This probes which internal concept channels contribute to the full-versus-masked difference. A separate reference restores all predicted IDs simultaneously.
+- **Measured-concept supplementation:** replace observed, encodable, learnable items of one ID with their recorded targets. Missing or unencodable items retain masked-input predictions. This estimates the potential value of obtaining that clinical record, with results for the full cohort and the observed-label subset.
 
 All channels sharing a Concept ID are manipulated together. The default bank retains eligible Measurement, Condition, Device, and Procedure concepts with task-specific outcome exclusions. [`configs/task_specific_concepts.json`](configs/task_specific_concepts.json) contains definitions and source-field mappings, not patient values. Supervision is extracted from local clinical data. `observation.csv` is still required: the excluded **concept domain** is distinct from the source table containing questionnaire answers used for labels and eligible concepts.
 
@@ -114,6 +121,10 @@ Under `outputs/study_without_observation/tables/`:
 | `CONCEPT_RESTORATION_ALL_test.csv` | Every **individually** restored Concept ID |
 | `CONCEPT_RESTORATION_SELECTED_AUROC_test.csv` | IDs above the descriptive ΔAUROC cutoff |
 | `ALL_CONCEPTS_RESTORED_test.csv` | All predicted concept channels restored **simultaneously** |
+| `SUMMARY_CONCEPT_RECOVERY_test.md` | Both concept interventions and their selected IDs in one summary |
+| `PREDICTED_CONCEPT_RECOVERY_ALL_test.csv` | Every individual predicted-ID recovery, including effects and selection statistics |
+| `MEASURED_CONCEPT_RECOVERY_ALL_test.csv` | Every individual measured-ID intervention on the full cohort |
+| `PREDICTED_CONCEPT_RECOVERY_SELECTED_test.csv`, `MEASURED_CONCEPT_RECOVERY_SELECTED_test.csv` | IDs exceeding the respective ΔAUROC mean + 2 SD |
 | `concept_diagnostics/SUMMARY_CONCEPT_DIAGNOSTICS_test.md` | Concept quality, Brier, and measured supplementation |
 | `concept_diagnostics/MEASURED_CONCEPT_SUPPLEMENTATION_test.csv` | Every measured-ID intervention, coverage, and effects |
 
@@ -123,24 +134,23 @@ Rebuild tables without fitting:
 
 ```bash
 python run.py --config outputs/study_without_observation/runtime.yaml --stage report
-python run.py --config outputs/study_without_observation/runtime.yaml --stage concept-diagnostics-report
 ```
 
-After the main study finishes, optional separate recovery and SI-control reports reuse its saved outputs:
+To rerun statistical analyses from saved model outputs, without fitting models or preprocessing data:
 
 ```bash
-python -u run_concept_recovery.py --devices 0 1 2 3
-python -u run_modality_control.py --devices 0 1 2 3
+python -u run.py --config outputs/study_without_observation/runtime.yaml --stage analyze --devices 0 1 2 3
 ```
 
-Their configs point to the same six-task run by default and write to `outputs/concept_recovery` and `outputs/modality_control`.
+Completed analysis units with matching settings are reused. Both concept-recovery summaries are produced automatically by the main workflow; Full-model ablation tables also provide the supplementary control.
 
-## Code map and optional experiments
+## Code map
 
 | Location | Role |
 |---|---|
 | `data_preprocessing_cluster/` | Label/clinical construction, ECG/sensor/retinal processing, train-only scalers |
 | `prepare_public_inputs.py` | Preparation from an independently downloaded dataset |
+| `run.py`, `worker.py`, `study.yaml` | One study entry point, GPU scheduling, and experiment settings |
 | `data.py`, `train.py` | Input loading/caching and Full/Basic training |
 | `vendor/task2_v2_model.py` | Modality encoders, 256-dimensional fusion, binary classifier |
 | `cbm/model.py`, `cbm/experiment.py` | Concept predictor and Mixed-CBM training |
@@ -148,8 +158,8 @@ Their configs point to the same six-task run by default and write to `outputs/co
 | `analysis.py`, `cbm/diagnostics.py`, `stats.py` | Ablations, restoration, paired statistics |
 | `report.py`, `cbm/*report.py` | Markdown/CSV tables |
 
-`study_with_observation.yaml` adds concepts from the four approved Observation surveys, reuses the default Full/Basic backbones, and writes a separate output folder; run it after the default study. `study_cardiovascular*.yaml` provides two-task runs. Optional Basic-CBM classification is enabled with `cbm_modes: [basic, mixed]`; the default paper workflow uses `[mixed]`.
+The public workflow retains the paper experiments above. Earlier Basic-CBM experiments, separate Observation-comparison configurations, and duplicate recovery/control launchers have been removed. The original preprocessing builders remain in `data_preprocessing_cluster/`.
 
-Existing Cluster experiments should continue with their saved `runtime.yaml` and original paths. Portable defaults do not point to or overwrite those runs. `pipeline.py`, `prepare_study_inputs.py`, and `preprocessing_study.yaml` retain historical preparation helpers; new users should use `prepare_public_inputs.py`.
+Existing Cluster experiments can use their saved `runtime.yaml` and original paths for the retained analyses. Portable defaults do not point to those runs. Historical experiment variants remain available in Git history; the current runner always uses Mixed CBM.
 
 Predicted restoration probes internal concept dependence. Measured supplementation evaluates additional recorded information. Neither demonstrates autonomous recovery of missing data. Restoring every full-input predicted channel reproduces the strict CBM's full-input predictions by construction.

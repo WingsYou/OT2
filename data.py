@@ -1,5 +1,4 @@
 """Read existing processed artifacts; cache frozen retinal features once."""
-import json
 from functools import lru_cache
 from pathlib import Path
 import numpy as np
@@ -7,65 +6,13 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset,DataLoader,Subset
 from common import (MODALITIES,FULL_CONFIGS,BASIC_KEYS,HISTORY_TARGETS,original_config,
-                    concept_dir,read_json,write_json,save_torch)
+                    read_json,write_json,save_torch)
 from task2_v2_dataset import (OT2V2Dataset,FrozenScalerGroup,SOURCE_FLAG_BY_GROUP,
                             RETINAL_GROUPS,_pad_temporal)
 from task2_v2_model import Task2V2ModelConfig,build_retinal_backbone
 from artifact_helpers import as_person_id
 
-PATH_COLUMNS=('environment_path','wearable_path','ecg_path','activity_path','cgm_path')
-
 def people_csv(path):return pd.read_csv(path,dtype={'person_id':str},keep_default_na=False)
-def absolute(value,root):
-    if not value:return ''
-    p=Path(value);return str(p if p.is_absolute() else Path(root)/p)
-
-def prepare(cfg):
-    out=Path(cfg['output_root']);out.mkdir(parents=True,exist_ok=True)
-    full_presence=[]
-    for task in FULL_CONFIGS:
-        source=people_csv(original_config(task,cfg)['dataset']['master_csv'])[['person_id','has_clinical']]
-        source['person_id']=source.person_id.map(as_person_id)
-        source['has_clinical']=source.has_clinical.astype(str).str.lower().isin(('true','1'))
-        full_presence.append(source)
-    full_presence=pd.concat(full_presence).groupby('person_id').has_clinical.any().to_dict()
-    write_json(out/'full_clinical_presence.json',full_presence)
-    entries={};frames=[];reference=None
-    for task in cfg['tasks']:
-        base=original_config(task,cfg);ds=base['dataset'];frame=people_csv(ds['master_csv'])
-        frame['person_id']=frame.person_id.map(as_person_id)
-        if frame.person_id.duplicated().any():raise ValueError('Duplicate participants in '+ds['master_csv'])
-        native_scalers=read_json(ds['scaler_json'])['scalers']
-        signature={k:{'feature_order':v['feature_order'],'features':v['features']} for k,v in native_scalers.items() if k!='clinical'}
-        if reference is not None and signature!=reference:raise ValueError('Nonclinical scaler statistics differ across source tasks; cannot share this cache')
-        reference=signature
-        for col in PATH_COLUMNS:frame[col]=frame.get(col,pd.Series('',index=frame.index)).map(lambda s:absolute(s,ds['artifact_root']))
-        frame['retinal_asset_paths_json']=frame.retinal_asset_paths_json.map(lambda s:json.dumps(sorted(absolute(p,ds['artifact_root']) for p in json.loads(s))))
-        clinical_base=base if task in FULL_CONFIGS else original_config('moca_binary',cfg)
-        cds=clinical_base['dataset'];cm=people_csv(cds['master_csv'])
-        cpath=absolute(cm.clinical_features_path.iloc[0],cds['artifact_root'])
-        entries[task]={'master':ds['master_csv'],'clinical_csv':cpath,'scaler':cds['scaler_json'],
-                       'clinical_schema':cds['clinical_schema_json'],
-                       'concept_dir':str(concept_dir(task,cfg)),'full_clinical_source_task':cds['task']}
-        frames.append(frame)
-    joined=pd.concat(frames,ignore_index=True).fillna('')
-    nonclinical_flags=[SOURCE_FLAG_BY_GROUP[g] for g in MODALITIES[1:]]
-    keys=['split',*PATH_COLUMNS,'retinal_asset_paths_json',*nonclinical_flags]
-    for col in nonclinical_flags:joined[col]=joined[col].astype(str).str.lower().replace({'1':'true','0':'false'})
-    if (joined.groupby('person_id')[keys].nunique()>1).any().any():
-        raise ValueError('A participant has conflicting official splits or modality artifacts across existing masters')
-    joined=joined.drop_duplicates('person_id').sort_values('person_id').reset_index(drop=True)
-    base=original_config('moca_binary',cfg);ds=base['dataset']
-    columns=['person_id',*keys,*[c for c in ('cgm_config_hash','activity_config_hash','wearable_config_hash') if c in joined]]
-    index=joined[columns].copy();index['task']='moca_binary';index['has_clinical']=False
-    index['clinical_features_path']=entries['moca_binary']['clinical_csv'] if 'moca_binary' in entries else absolute(people_csv(ds['master_csv']).clinical_features_path.iloc[0],ds['artifact_root'])
-    index['task_config_hash']=read_json(ds['scaler_json'])['source_config_hashes']['clinical']['task_config_hash']
-    cache=out/'cache';cache.mkdir(exist_ok=True);index.to_csv(cache/'index.csv',index=False)
-    meta=read_json(ds['master_metadata_json']);meta['n_rows']=len(index)
-    write_json(cache/'index.metadata.json',meta)
-    write_json(out/'inputs.json',entries)
-    # Only bookkeeping is written. No label rebuilding, scaler fitting or raw preprocessing.
-    return entries
 
 def raw_dataset(cfg):
     base=original_config('moca_binary',cfg);ds=base['dataset']

@@ -9,7 +9,7 @@ from stats import PairedF1, f1
 from cbm.model import restore, predict
 from cbm.experiment import concept_id_groups, restoration_batch
 
-ANALYSIS_VERSION = 4
+ANALYSIS_VERSION = 5
 
 
 def paired_effects(boot, a, b, ca, cb):
@@ -49,20 +49,18 @@ def run_analysis(task, cfg, device):
     root = Path(cfg['output_root'])/task
     backbone = backbone_dir(task, cfg)
     out = root/'analysis'; out.mkdir(parents=True, exist_ok=True)
-    modes = cfg.get('cbm_modes', ['basic','mixed'])
     done = read_json(out/'DONE.json') if (out/'DONE.json').exists() else {}
-    if (done.get('analysis_version') == ANALYSIS_VERSION
-            and done.get('cbm_modes', ['basic','mixed']) == modes):
+    if done.get('analysis_version') == ANALYSIS_VERSION:
         print(f'[reuse analysis] {task}', flush=True); return
     # Invalidate old completion before writing the replacement tables.
     (out/'DONE.json').unlink(missing_ok=True)
     # Original multimodal checkpoints/features are read-only, including on upgrade.
     removals = {v: cached_removals(task, v, cfg, device, out) for v in ('full','basic')}
-    artifacts = {mode: load(root/(mode+'_cbm')/'model.pt') for mode in modes}
-    models = {mode: restore(a, device) for mode, a in artifacts.items()}
-    groups = concept_id_groups(artifacts['mixed']['spec']['items'])
+    artifact = load(root/'mixed_cbm/model.pt')
+    model = restore(artifact, device)
+    groups = concept_id_groups(artifact['spec']['items'])
     cuts = {k: read_json(backbone/k/'TRAINING_DONE.json')['threshold'] for k in ('full','basic')}
-    cuts.update({m+'_cbm': a['threshold'] for m, a in artifacts.items()})
+    cuts['mixed_cbm'] = artifact['threshold']
     torch.set_float32_matmul_precision('highest')
     classification, comparisons, ablations, recoveries, cohorts = [], [], [], [], []
     selection = dict(metric='positive_class_f1', selection_split='val', top_modalities={},
@@ -74,17 +72,14 @@ def run_analysis(task, cfg, device):
             raise ValueError(f'{task}/{split}: Full and Basic predictions must use the same ordered participants')
         y = basic['y'].numpy(); n = len(y)
         boot = PairedF1(y, cfg['bootstrap_samples'], cfg['seed'], device)
-        fz, fp = predict(models['mixed'], full['embedding'])
-        mz, mp = predict(models['mixed'], full['masked_embedding'])
+        fz, fp = predict(model, full['embedding'])
+        mz, mp = predict(model, full['masked_embedding'])
         conditions = {
             'full': (full['original_logits'].sigmoid().numpy(), cuts['full']),
             'full_basic_inference': (full['masked_logits'].sigmoid().numpy(), cuts['full']),
             'basic': (basic['original_logits'].sigmoid().numpy(), cuts['basic']),
             'mixed_full': (fp, cuts['mixed_cbm']),
             'mixed_basic': (mp, cuts['mixed_cbm'])}
-        if 'basic' in models:
-            _, bp = predict(models['basic'], basic['embedding'])
-            conditions['basic_cbm'] = (bp, cuts['basic_cbm'])
         cohorts.append(dict(task=task, split=split, n=n, positive=int(y.sum()), negative=int(n-y.sum()),
                             prevalence=float(y.mean()), all_positive_f1=float(2*y.sum()/(n+y.sum()))))
         predictions = dict(person_id=basic['person_ids'], y=y)
@@ -98,8 +93,6 @@ def run_analysis(task, cfg, device):
             ('retraining_gain','basic','full_basic_inference','downstream'),
             ('mixed_cbm_gain','mixed_basic','full_basic_inference','cbm'),
             ('mixed_input_loss','mixed_full','mixed_basic','cbm')]
-        if 'basic' in models:
-            definitions.append(('basic_cbm_gain','basic_cbm','basic','cbm'))
         for label, a, b, family in definitions:
             pa, ca = conditions[a]; pb, cb = conditions[b]
             comparisons.append(dict(task=task, split=split, comparison=label, family=family,
@@ -126,7 +119,7 @@ def run_analysis(task, cfg, device):
                 predictions[variant+'__without__'+name] = p
         pd.DataFrame(predictions).to_csv(out/f'predictions_{split}.csv', index=False)
         # All tasks use exactly the same Mixed-CBM missing-input condition.
-        model = models['mixed']; cut = cuts['mixed_cbm']; names = list(groups)
+        cut = cuts['mixed_cbm']; names = list(groups)
         restored = np.concatenate([restoration_batch(model, mz, fz, [groups[c]['columns'] for c in names[start:start+32]])
                                    for start in range(0, len(names), 32)])
         details = restoration_details(y, restored, mp, cut, [groups[c]['learnable'] for c in names])
@@ -168,5 +161,5 @@ def run_analysis(task, cfg, device):
                        ('restoration',recoveries), ('cohorts',cohorts)]:
         pd.DataFrame(rows).to_csv(out/(name+'.csv'), index=False)
     write_json(out/'DONE.json', dict(task=task, seed=cfg['seed'], bootstrap_samples=cfg['bootstrap_samples'],
-                                   analysis_version=ANALYSIS_VERSION, cbm_modes=modes,
+                                   analysis_version=ANALYSIS_VERSION,
                                    reported_metrics=['f1','balanced_accuracy','auroc']))

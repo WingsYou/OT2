@@ -10,10 +10,10 @@ import yaml
 from sklearn.metrics import f1_score, balanced_accuracy_score
 from common import MODALITIES, REMOVALS, read_json, write_json, save_torch
 from stats import balanced_indices, f1, threshold, PairedF1, bh_adjust
-from train import run_model, load, FrozenFusionReadout
+from train import run_model, load
 from data import SOURCE_FLAG_BY_GROUP
 from task2_v2_model import Task2V2ModelConfig
-from cbm.labels import load_bank, FOUR_OBSERVATION_FORMS, SURVEY_ADMIN_IDS
+from cbm.labels import load_bank, SURVEY_ADMIN_IDS
 from cbm.experiment import run_cbm, concept_id_groups, restoration_batch
 from cbm.model import restore, predict
 from analysis import run_analysis, restoration_details, ANALYSIS_VERSION
@@ -25,21 +25,19 @@ class F1StudyTests(unittest.TestCase):
         import worker
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'config.yaml'
-            for modes in (None, ['mixed']):
-                cfg=dict(cpu_threads=1)
-                if modes is not None:cfg['cbm_modes']=modes
-                path.write_text(yaml.safe_dump(cfg))
-                for variant in ('full','basic'):
-                    with self.subTest(modes=modes,variant=variant), \
-                            patch('sys.argv',['worker.py','--config',str(path),'--task','moca_binary','--variant',variant,'--cpu']), \
-                            patch('train.run_model') as train_model, patch('cbm.experiment.run_cbm') as train_cbm:
-                        worker.main()
-                        train_model.assert_called_once()
-                        if variant=='full' or modes is None:
-                            train_cbm.assert_called_once()
-                            self.assertEqual(train_cbm.call_args.args[1],'mixed' if variant=='full' else 'basic')
-                        else:
-                            train_cbm.assert_not_called()
+            cfg=dict(cpu_threads=1)
+            path.write_text(yaml.safe_dump(cfg))
+            for variant in ('full','basic'):
+                with self.subTest(variant=variant), \
+                        patch('sys.argv',['worker.py','--config',str(path),'--task','moca_binary','--variant',variant,'--cpu']), \
+                        patch('train.run_model') as train_model, patch('cbm.experiment.run_cbm') as train_cbm:
+                    worker.main()
+                    train_model.assert_called_once()
+                    if variant=='full':
+                        train_cbm.assert_called_once()
+                        self.assertEqual(train_cbm.call_args.args[:2],('moca_binary',cfg))
+                    else:
+                        train_cbm.assert_not_called()
 
     def test_balancing_threshold_and_paired_statistics(self):
         y=np.array([0]*7+[1]*3);idx=balanced_indices(y,42)
@@ -87,51 +85,36 @@ class F1StudyTests(unittest.TestCase):
         self.assertEqual([x['n_prediction_changes'] for x in d],[0,0,0,2])
 
     def test_approved_inventory(self):
-        bank=load_bank(observation_forms=FOUR_OBSERVATION_FORMS,excluded_ids=SURVEY_ADMIN_IDS)
-        counts={'moca_binary':222,'cvd_broad_binary':217,'cvd_strict_binary':220,
-                'osteoporosis_history_binary':224,'kidney_history_binary':224,'lung_history_binary':224,
-                'cardiovascular_conditions_binary':220,'major_cardiovascular_events_binary':223}
-        for task,n in counts.items():self.assertEqual(bank['tasks'][task]['inventory_ids'],n)
+        cfg=yaml.safe_load(Path('study.yaml').read_text())
+        self.assertTrue(cfg['exclude_observation'])
+        bank=load_bank(observation_forms=(),excluded_ids=SURVEY_ADMIN_IDS)
+        counts={'moca_binary':109,'cardiovascular_conditions_binary':107,
+                'major_cardiovascular_events_binary':110,'osteoporosis_history_binary':111,
+                'kidney_history_binary':111,'lung_history_binary':111}
+        self.assertEqual(set(cfg['tasks']),set(counts))
+        self.assertFalse(any(c['domain']=='Observation' for c in bank['concepts'].values()))
         self.assertFalse(set(SURVEY_ADMIN_IDS)&{c['concept_id'] for c in bank['concepts'].values()})
-        obs=[c for c in bank['concepts'].values() if c['domain']=='Observation']
-        self.assertEqual({c['form_name'] for c in obs},set(FOUR_OBSERVATION_FORMS))
-        fields={bank['concepts'][k]['source_field'] for k in bank['tasks']['kidney_history_binary']['concept_keys']}
-        self.assertNotIn('mhoccur_rnl',fields)
-        reduced=load_bank(observation_forms=(),excluded_ids=SURVEY_ADMIN_IDS)
-        self.assertFalse(any(c['domain']=='Observation' for c in reduced['concepts'].values()))
-        for task, n in counts.items():
-            self.assertEqual(reduced['tasks'][task]['inventory_ids'],n-113)
-        targets={'cardiovascular_conditions_binary':{'mhoccur_hbp','mhoccur_clsh','mhoccur_circ','mhoccur_rvo','mhoccur_cvdot'},
-                 'major_cardiovascular_events_binary':{'mhoccur_mi','mhoccur_strk'}}
-        for task, excluded in targets.items():
-            fields={bank['concepts'][k]['source_field'] for k in bank['tasks'][task]['concept_keys']}
-            self.assertFalse(fields & excluded)
-            other=set().union(*(v for k,v in targets.items() if k!=task))
-            self.assertTrue(other <= fields)
-        for task, policy in bank['tasks'].items():
-            nonobs={k for k in policy['concept_keys'] if bank['concepts'][k]['domain']!='Observation'}
-            self.assertEqual(nonobs,set(reduced['tasks'][task]['concept_keys']))
+        targets={'moca_binary':{'mhoccur_ad','mhoccur_cogn','mocacmpdattim'},
+                 'cardiovascular_conditions_binary':{'mhoccur_hbp','mhoccur_clsh','mhoccur_circ','mhoccur_rvo','mhoccur_cvdot'},
+                 'major_cardiovascular_events_binary':{'mhoccur_mi','mhoccur_strk'},
+                 'osteoporosis_history_binary':{'mhoccur_oa'},'kidney_history_binary':{'mhoccur_rnl'},
+                 'lung_history_binary':{'mhoccur_plm'}}
+        for task,n in counts.items():
+            self.assertEqual(bank['tasks'][task]['inventory_ids'],n)
+            keys=bank['tasks'][task]['concept_keys']
+            fields={bank['concepts'][k]['source_field'] for k in keys}
+            self.assertFalse(fields & targets[task])
             self.assertTrue(any(bank['concepts'][k]['domain']=='Condition' and
-                                bank['concepts'][k]['form_name']=='health_survey' for k in nonobs))
-            for key in policy:
-                if key.startswith('excluded_'):self.assertEqual(policy[key],reduced['tasks'][task][key])
-        self.assertFalse(any(c['source_field'].endswith(('_metadata','cmpdat','startts','cmpts')) for c in obs))
-        with_obs=yaml.safe_load(Path('study_with_observation.yaml').read_text())
-        without_obs=yaml.safe_load(Path('study_no_observation.yaml').read_text())
-        differences={k for k in set(with_obs)|set(without_obs) if with_obs.get(k)!=without_obs.get(k)}
-        self.assertEqual(differences,{'output_root','exclude_observation','backbone_root'})
-        self.assertFalse(with_obs['exclude_observation'])
+                                bank['concepts'][k]['form_name']=='health_survey' for k in keys))
+        for task in ('cardiovascular_conditions_binary','major_cardiovascular_events_binary'):
+            fields={bank['concepts'][k]['source_field'] for k in bank['tasks'][task]['concept_keys']}
+            other='major_cardiovascular_events_binary' if task=='cardiovascular_conditions_binary' else 'cardiovascular_conditions_binary'
+            self.assertTrue(targets[other] <= fields)
 
-
-
-    def test_small_end_to_end_both_backbones_and_cbms(self):
+    def test_small_end_to_end_both_backbones_and_mixed_cbm(self):
         torch.set_num_threads(1);torch.manual_seed(7)
         task='moca_binary';cfg=yaml.safe_load(Path('study.yaml').read_text())
-        # The legacy configuration without cbm_modes continues to fit both CBMs.
-        cfg.pop('cbm_modes',None)
         cfg.pop('backbone_root',None)
-        cfg['exclude_observation']=False
-        cfg.pop('concept_ranking',None)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'source';out=root/'results'
             (source/'cache/people').mkdir(parents=True);(out/'labels'/task).mkdir(parents=True)
@@ -177,8 +160,7 @@ class F1StudyTests(unittest.TestCase):
                         cache=load(out/task/variant/f'features_{split}.pt')
                         self.assertEqual(len(cache['person_ids']),6)
                         self.assertEqual(len(set(cache['person_ids'])),6)
-                    mode='mixed' if variant=='full' else 'basic'
-                    run_cbm(task,mode,cfg,torch.device('cpu'))
+                run_cbm(task,cfg,torch.device('cpu'))
             cache=load(out/task/'basic/features_val.pt')
             removed=load(out/task/'basic/removals_val.pt')
             np.testing.assert_allclose(removed['environment']['probability'][-1],cache['original_logits'].sigmoid().numpy()[-1],atol=1e-7)
@@ -223,8 +205,7 @@ class F1StudyTests(unittest.TestCase):
             text=(out/'tables/SUMMARY_test.md').read_text()
             self.assertIn('All clinical information',text);self.assertIn('Basic-only inputs + all concepts restored',text)
             self.assertNotIn('### Basic CBM: top-three',text)
-            self.assertIn('The form restriction applies only to Observation',text)
-            self.assertIn('2005200559',text)
+            self.assertIn('all Observation-domain concepts excluded',text)
             exported=pd.read_csv(out/'tables/CONCEPT_RESTORATION_ALL_test.csv',dtype={'concept_id':str})
             self.assertEqual(len(exported),12)
             self.assertEqual(len(pd.read_csv(out/'tables/ALL_CONCEPTS_RESTORED_test.csv')),1)
@@ -238,9 +219,6 @@ class F1StudyTests(unittest.TestCase):
                 prob=saved[row.concept_id].to_numpy(np.float32);masked=saved.masked_probability.to_numpy(np.float32)
                 self.assertEqual(row.n_prediction_changes,int(np.count_nonzero((prob>=row.threshold)!=(masked>=row.threshold))))
                 self.assertAlmostEqual(row.mean_abs_probability_change,float(np.abs(prob-masked).mean()))
-            cfg['concept_ranking']='auroc_mean_plus_2sd'
-            make_report(cfg)
-            exported=pd.read_csv(out/'tables/CONCEPT_RESTORATION_ALL_test.csv',dtype={'concept_id':str})
             gains=exported.auroc_value.to_numpy()
             cutoff=gains.mean()+2*gains.std(ddof=0)
             np.testing.assert_allclose(exported.auroc_selection_cutoff,cutoff)
@@ -266,12 +244,7 @@ class F1StudyTests(unittest.TestCase):
             expected=model.task_head(direct).squeeze(-1).sigmoid().numpy()
             np.testing.assert_allclose(restoration_batch(model,masked_z,full_z,[columns])[0],expected,atol=1e-7)
             np.testing.assert_allclose(restoration_batch(model,masked_z,full_z,[list(range(model.spec['width']))])[0],full_p,atol=1e-7)
-            # Public Mixed-only mode needs both backbones but no Basic-CBM files.
-            shutil.move(str(out/task/'basic_cbm'),str(root/'legacy_basic_cbm'))
-            cfg['cbm_modes']=['mixed']
-            run_analysis(task,cfg,torch.device('cpu'))
-            make_report(cfg)
-            self.assertEqual(read_json(analysis/'DONE.json')['cbm_modes'],['mixed'])
+            self.assertFalse((out/task/'basic_cbm').exists())
             classification=pd.read_csv(analysis/'classification.csv')
             self.assertEqual(set(classification.model),{'full','full_basic_inference','basic','mixed_full','mixed_basic'})
             comparisons=pd.read_csv(analysis/'comparisons.csv')
@@ -283,6 +256,17 @@ class F1StudyTests(unittest.TestCase):
             self.assertIn('Basic Clinical model',text)
             with patch('analysis.restore',side_effect=AssertionError('completed Mixed-only analysis must reuse')):
                 run_analysis(task,cfg,torch.device('cpu'))
+            from cbm.diagnostics import run_diagnostics
+            from run import make_reports
+            run_diagnostics(task,cfg,torch.device('cpu'))
+            make_reports(cfg)
+            for split in ('val','test'):
+                self.assertTrue((out/'tables'/f'SUMMARY_CONCEPT_RECOVERY_{split}.md').exists())
+                for intervention in ('PREDICTED','MEASURED'):
+                    all_ids=pd.read_csv(out/'tables'/f'{intervention}_CONCEPT_RECOVERY_ALL_{split}.csv',dtype={'concept_id':str})
+                    self.assertEqual(set(all_ids.concept_id),set(groups))
+                    self.assertEqual(set(all_ids.population),{'all_participants'})
+
 
 
 if __name__=='__main__':unittest.main()
